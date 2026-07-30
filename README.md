@@ -1,14 +1,183 @@
-# astrbot-plugin-helloworld
+# 积分系统插件 for AstrBot
 
-AstrBot 插件模板 / A template plugin for AstrBot plugin feature
+> 一个功能完整的群聊积分系统，支持签到、抽奖、兑换、排行、生日、口令等多项功能。
 
-> [!NOTE]
-> This repo is just a template of [AstrBot](https://github.com/AstrBotDevs/AstrBot) Plugin.
-> 
-> [AstrBot](https://github.com/AstrBotDevs/AstrBot) is an agentic assistant for both personal and group conversations. It can be deployed across dozens of mainstream instant messaging platforms, including QQ, Telegram, Feishu, DingTalk, Slack, LINE, Discord, Matrix, etc. In addition, it provides a reliable and extensible conversational AI infrastructure for individuals, developers, and teams. Whether you need a personal AI companion, an intelligent customer support agent, an automation assistant, or an enterprise knowledge base, AstrBot enables you to quickly build AI applications directly within your existing messaging workflows.
+## 功能列表
 
-# Supports
+| 功能 | 说明 |
+|------|------|
+| 每日签到 | 固定/随机积分，首次签到奖励、每日首签奖励、连签奖励（有上限）、每 7 天奖励，签到回复尾附每日运势 |
+| 彩蛋事件 | 签到概率触发欧皇/非酋事件，±大量积分，有独立保底计数器 |
+| 活跃奖励 | 群成员发送合规消息（达到字数下限），概率获得积分，有用户冷却 + 全局冷却 |
+| 每日口令 | 管理员当天动态设置关键词+积分，消息含该关键词即得（每人每天限 1 次） |
+| 日期口令 | 预配置日期范围+关键词+概率，签到联动触发，支持跨年 |
+| 无前缀触发 | 消息含配置关键词即可触发签到/抽奖/排行，无需命令前缀 |
+| 群内排行 | 当前群正积分用户 Top 10，注册用户不足 3 人时回退全局排行 |
+| 个人抽奖 | 固定消耗+口令验证，五档权重概率（特等奖/一等奖/二等奖/三等奖/参与奖） |
+| 兑换玩法 | 积分换物品，库存管理（原子扣减），兑换记录+核销状态双向切换，限时折扣 |
+| 管理员指令 | 独立管理员名单（bot 主人自动为管理员），增减积分，管理兑换/口令/配置 |
+| 生日系统 | 记录生日（MM-DD / MM月DD日），生日签到奖励，定时播报当日寿星 |
+| 负分联动 | 负分仅可签到恢复积分，不能抽奖/兑换/活跃奖励，自动分配/撤销"群女仆X号"头衔 |
+| 自动备份 | 多本地目标路径，定时备份（默认凌晨 3:00） |
+| 积分流水 | 每笔积分变动自动记录（时间、原因、变动值、余额），用户可查明细 |
+| 签到统计 | 查询今日签到人数、签到率、首签用户、连签王 |
+| 兑换折扣 | 管理员可为兑换物品设置限时折扣价 |
 
-- [AstrBot Repo](https://github.com/AstrBotDevs/AstrBot)
-- [AstrBot Plugin Development Docs (Chinese)](https://docs.astrbot.app/dev/star/plugin-new.html)
-- [AstrBot Plugin Development Docs (English)](https://docs.astrbot.app/en/dev/star/plugin-new.html)
+## 快速开始
+
+### 安装
+
+将本插件目录放入 `AstrBot/data/plugins/` 下，重启 AstrBot 或热重载插件即可。
+
+依赖会自动通过 `requirements.txt` 安装（仅 `aiosqlite`）。
+
+### 基本用法
+
+```
+# 签到（无前缀触发）
+签到
+
+# 抽奖（需要口令，默认 whl）
+whl抽奖
+
+# 查看排行
+排行
+
+# 查看可兑换物品
+/兑换
+
+# 兑换物品
+/兑换 1
+
+# 查看积分流水
+/流水
+
+# 查看签到统计
+/签到统计
+
+# 设置生日
+/设置生日 08-15
+
+# 管理员：加分
+/加分 @用户 50
+
+# 管理员：设置每日口令
+/设置今日口令 红包 10
+```
+
+## 完整指令表
+
+### 成员指令
+
+| 触发方式 | 指令/关键词 | 说明 |
+|----------|------------|------|
+| 无前缀 | `签到` / `sign` / `打卡` | 签到（回复含运势） |
+| 无前缀 | `{口令}抽奖` / `抽奖{口令}` | 抽奖（口令默认 whl） |
+| 无前缀 | `排行` / `排名` / `积分榜` | 群排行 |
+| 有前缀 | `/兑换` | 查看可兑换物品 |
+| 有前缀 | `/兑换 <物品ID> [数量]` | 兑换物品 |
+| 有前缀 | `/兑换记录 [页码]` | 查看自己的兑换记录 |
+| 有前缀 | `/兑换记录 <record_no>` | 查看单条详情 |
+| 有前缀 | `/流水 [页码]` | 查看自己积分流水 |
+| 有前缀 | `/签到统计` | 今日签到数据 |
+| 有前缀 | `/设置生日 <MM-DD / MM月DD日>` | 设置生日 |
+| 有前缀 | `/查生日 [@用户]` | 查看生日 |
+
+### 管理员指令
+
+| 指令 | 说明 |
+|------|------|
+| `/加分 @用户/Q号 <分值>` | 增加积分 |
+| `/扣分 @用户/Q号 <分值>` | 扣除积分 |
+| `/添加兑换 <名称> <消耗> [库存]` | 新增兑换物品 |
+| `/删除兑换 <物品ID>` | 软删除物品 |
+| `/修改兑换 <ID> <字段> <值>` | 修改物品属性 |
+| `/核销 <记录编号> [备注]` | 切换核销状态（pending ↔ verified） |
+| `/设置折扣 <ID> <折扣价> <截止时间>` | 设置兑换折扣 |
+| `/清除折扣 <ID>` | 清除兑换折扣 |
+| `/设置今日口令 <关键词> <积分>` | 设置每日口令 |
+| `/清除今日口令` | 清除每日口令 |
+| `/设置 <配置项> <值>` | 修改运行时配置 |
+| `/查看配置` | 查看当前配置 |
+| `/兑换记录 all [页码]` | 查看全部兑换记录 |
+| `/兑换记录 pending [页码]` | 查看未核销记录 |
+| `/流水 @用户 [页码]` | 查看指定用户流水 |
+
+## 配置项
+
+所有配置通过 `/设置 <键> <值>` 动态修改，热生效。
+
+| 键 | 类型 | 默认值 | 说明 |
+|-----|------|--------|------|
+| **签到** | | | |
+| signin_fixed_mode | bool | false | true=固定 / false=随机 |
+| signin_fixed_points | int | 10 | 固定签到积分 |
+| signin_random_min | int | 1 | 随机下限 |
+| signin_random_max | int | 20 | 随机上限 |
+| signin_first_bonus | int | 50 | 首次签到额外奖励 |
+| signin_day_first_bonus | int | 30 | 每日首签额外奖励 |
+| signin_consecutive_max | int | 30 | 连签天数上限 |
+| signin_consecutive_bonus_per_day | int | 5 | 连签每日递加值 |
+| signin_weekly_bonus | int | 100 | 每 7 天额外奖励 |
+| **活跃奖励** | | | |
+| active_reward_enabled | bool | true | 开关 |
+| active_reward_probability | float | 0.05 | 触发概率 (0~1) |
+| active_reward_points | int | 1 | 每次奖励积分 |
+| active_reward_cooldown | int | 60 | 同用户冷却秒数 |
+| active_reward_min_length | int | 3 | 消息最小字数 |
+| active_reward_global_cooldown | int | 10 | 全群全局冷却秒数 |
+| **抽奖** | | | |
+| lottery_enabled | bool | true | 开关 |
+| lottery_cost | int | 100 | 单次消耗积分 |
+| lottery_passphrase | str | whl | 抽奖口令 |
+| lottery_tiers | json | (五档) | 权重+倍率+标签+emoji |
+| **负分** | | | |
+| negative_disable_lottery | bool | true | 负分禁止抽奖 |
+| **生日** | | | |
+| birthday_bonus_points | int | 100 | 生日签到奖励 |
+| birthday_announce_time | str | 08:00 | 每日播报时间 |
+| **备份** | | | |
+| backup_enabled | bool | true | 开关 |
+| **关键词** | | | |
+| keyword_sign | json | ["签到","sign","打卡"] | 签到触发关键词 |
+| keyword_lottery | json | ["抽奖","lottery"] | 抽奖触发关键词 |
+
+### 抽奖五档默认配置
+
+```json
+{
+  "tiers": [
+    {"label":"特等奖", "weight":1,  "multiplier":10.0, "emoji":"👑"},
+    {"label":"一等奖", "weight":5,  "multiplier":5.0,  "emoji":"🥇"},
+    {"label":"二等奖", "weight":15, "multiplier":2.0,  "emoji":"🥈"},
+    {"label":"三等奖", "weight":30, "multiplier":1.2,  "emoji":"🥉"},
+    {"label":"参与奖", "weight":49, "multiplier":0.0,  "emoji":"💫"}
+  ]
+}
+```
+
+权重决定概率，`奖励 = 消耗 × 倍率`，参与奖 ×0.0 即消耗不返还。
+
+## 数据存储
+
+- **数据库文件**: `AstrBot/data/points_system.db`（SQLite，WAL 模式）
+- **自动备份**: 默认每天 03:00 备份到配置的目录，文件名含时间戳
+- **备份前**自动执行 `WAL checkpoint` 确保数据完整性
+
+## 依赖
+
+- `aiosqlite >= 0.20.0` — 异步 SQLite 驱动
+
+## 开发
+
+```bash
+# 克隆项目
+git clone https://github.com/WHLofficial/astrbot_plugin_point_system_by_whleague
+# 放到 AstrBot 插件目录
+cp -r astrbot_plugin_point_system_by_whleague AstrBot/data/plugins/
+# 重启 AstrBot 或热重载
+```
+
+## 许可证
+
+MIT

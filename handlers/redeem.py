@@ -60,6 +60,9 @@ class RedeemHandler:
                 if not record:
                     yield event.plain_result(f"\u8bb0\u5f55 {target} \u4e0d\u5b58\u5728")
                     return
+                if record["group_id"] != event.get_group_id() and not event.is_admin():
+                    yield event.plain_result("\u4f60\u65e0\u6743\u67e5\u770b\u5176\u4ed6\u7fa4\u7684\u8bb0\u5f55")
+                    return
                 if record["qq"] != qq and not is_admin:
                     yield event.plain_result("\u4f60\u65e0\u6743\u67e5\u770b\u8be5\u8bb0\u5f55")
                     return
@@ -76,12 +79,18 @@ class RedeemHandler:
                 yield event.plain_result("\n".join(lines))
                 return
 
-            if target == "all" and is_admin:
-                records = await self._plugin.dao.get_redeem_records_all(limit=limit, offset=offset)
-            elif target == "pending" and is_admin:
-                records = await self._plugin.dao.get_redeem_records_all(status="pending", limit=limit, offset=offset)
+            if (target == "all" or target == "pending") and is_admin:
+                status_filter = "pending" if target == "pending" else None
+                if event.is_admin():
+                    records = await self._plugin.dao.get_redeem_records_all(
+                        status=status_filter, limit=limit, offset=offset
+                    )
+                else:
+                    records = await self._plugin.dao.get_redeem_records_all(
+                        status=status_filter, group_id=group_id, limit=limit, offset=offset
+                    )
             else:
-                records = await self._plugin.dao.get_redeem_records_by_user(qq, limit=limit, offset=offset)
+                records = await self._plugin.dao.get_redeem_records_by_user(qq, group_id=group_id, limit=limit, offset=offset)
 
             if not records:
                 yield event.plain_result("\u6ca1\u6709\u8bb0\u5f55")

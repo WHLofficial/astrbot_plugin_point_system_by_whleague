@@ -1,13 +1,46 @@
 ﻿import json
+import random
+import time
 from collections.abc import AsyncGenerator
+from typing import Optional
 from astrbot.api import logger
 from astrbot.api.event import MessageEventResult
 from ..utils.security import parse_int, parse_qq, parse_qq_arg, sanitize_text
+
+_CLEAR_TOKEN_TTL = 300.0
+
+# 清空范围对应的表（顺序即删除顺序，先删子表再删父表以通过外键约束）
+_GROUP_CLEAR_TABLES = (
+    "daily_keyword_claim",
+    "daily_keyword",
+    "redeem_records",
+    "sign_in_log",
+    "lottery_record",
+    "point_transactions",
+    "birthday_announce_log",
+    "users",
+)
+_GLOBAL_CLEAR_TABLES = (
+    "daily_keyword_claim",
+    "daily_keyword",
+    "redeem_records",
+    "redeem_items",
+    "sign_in_log",
+    "lottery_record",
+    "point_transactions",
+    "birthday_announce_log",
+    "date_rewards",
+    "admins",
+    "easter_events",
+    "users",
+)
 
 
 class AdminHandler:
     def __init__(self, plugin):
         self._plugin = plugin
+        self._pending_clears: dict[str, dict] = {}
+        """qq -> {"token", "scope", "group_id", "expires_at"}"""
 
     async def _is_admin(self, event) -> bool:
         if event.is_admin():
@@ -148,6 +181,10 @@ class AdminHandler:
                 value = parse_int(raw_value, min_val=-1)
             elif field == "discount_price":
                 value = parse_int(raw_value, min_val=1)
+                item = await self._plugin.dao.get_item(item_id)
+                if item and value >= item["cost"]:
+                    yield event.plain_result("折扣价应低于原价")
+                    return
             elif field == "discount_end_time":
                 from datetime import datetime
                 try:
@@ -229,11 +266,19 @@ class AdminHandler:
             if key == "signin_random_max" and parsed < new_cache["signin_random_min"]:
                 yield event.plain_result("signin_random_max 不能小于 signin_random_min")
                 return
+            if key in ("active_reward_points_min", "active_reward_points_max"):
+                other = "active_reward_points_max" if key == "active_reward_points_min" else "active_reward_points_min"
+                if key == "active_reward_points_min" and parsed > new_cache[other]:
+                    yield event.plain_result("active_reward_points_min 不能大于 active_reward_points_max")
+                    return
+                if key == "active_reward_points_max" and parsed < new_cache[other]:
+                    yield event.plain_result("active_reward_points_max 不能小于 active_reward_points_min")
+                    return
             if key in ("keyword_sign", "keyword_lottery", "backup_dirs"):
                 stored = json.dumps(parsed, ensure_ascii=False)
             else:
                 stored = str(parsed)
-            self._plugin.config_cache = new_cache
+            self._plugin.config_cache[key] = parsed
             if self._plugin.config is not None:
                 self._plugin.config[key] = parsed
                 self._plugin.config.save_config()
@@ -442,3 +487,143 @@ class AdminHandler:
         except Exception as e:
             logger.error(f"View date rewards error: {e}")
             yield event.plain_result("查询失败")
+
+    # ─── 数据清空（验证码二次确认） ─────────────────────────
+
+    async def clear_data(self, event, scope: str) -> AsyncGenerator[MessageEventResult, None]:
+        """发起清空操作：生成验证码令牌，等待 /确认清空 完成。"""
+        if scope == "group":
+            if not await self._require_admin(event):
+                async for r in self._deny(event):
+                    yield r
+                return
+            group_id = event.get_group_id()
+            if not group_id:
+                yield event.plain_result("仅支持在群聊中清空本群数据")
+                return
+            scope_desc = "本群积分数据（用户、积分、流水、抽奖/兑换记录、口令等）"
+        else:
+            if not event.is_admin():
+                yield event.plain_result("仅 AstrBot 全局管理员可执行全局清空")
+                return
+            group_id = None
+            scope_desc = "全部数据（含商店物品、日期奖励、管理名单等所有数据）"
+
+        token = str(random.randint(100000, 999999))
+        self._pending_clears[event.get_sender_id()] = {
+            "token": token,
+            "scope": scope,
+            "group_id": group_id,
+            "expires_at": time.time() + _CLEAR_TOKEN_TTL,
+        }
+        yield event.plain_result(
+            f"⚠️ 确认清空{scope_desc}？此操作不可恢复！\n"
+            f"清空前将自动备份数据库。\n"
+            f"请回复 /确认清空 {token} 完成确认（5 分钟内有效）。"
+        )
+
+    async def confirm_clear(self, event) -> AsyncGenerator[MessageEventResult, None]:
+        """校验验证码并执行清空：先备份，再恢复负分头衔名片，最后事务内删除。"""
+        try:
+            parts = event.get_message_str().split()
+            if len(parts) < 2:
+                yield event.plain_result("用法: /确认清空 <验证码>")
+                return
+
+            qq = event.get_sender_id()
+            pending = self._pending_clears.pop(qq, None)
+            if not pending:
+                yield event.plain_result("没有待确认的清空操作，请先发起 /清空数据 或 /清空全部数据")
+                return
+            if time.time() > pending["expires_at"]:
+                yield event.plain_result("验证码已过期，请重新发起清空操作")
+                return
+            if pending["token"] != parts[1].strip():
+                yield event.plain_result("验证码错误，已取消本次清空")
+                return
+
+            scope = pending["scope"]
+            group_id = pending["group_id"]
+            bot = getattr(event, "bot", None)
+
+            # 1. 清空前自动备份（不依赖 backup_dirs 配置）
+            from pathlib import Path
+            backup_dir = Path(self._plugin.db.db_path).parent / "backup_before_clear"
+            try:
+                backup_path = await self._plugin.backup_service.backup_unique(
+                    backup_dir, "before_clear"
+                )
+            except Exception as e:
+                logger.error(f"Backup before clear failed: {e}")
+                backup_path = None
+
+            # 2. 恢复负分头衔原名片（原名片存于待删行内，须先恢复）
+            restored = await self._restore_negative_cards(bot, scope, group_id)
+
+            # 3. 事务内删除
+            counts = await self._do_clear(scope, group_id)
+
+            lines = [
+                f"✅ 已清空{'本群' if scope == 'group' else '全部'}数据：",
+                f"  · 用户 {counts.get('users', 0)}，流水 {counts.get('point_transactions', 0)} 条",
+                f"  · 签到 {counts.get('sign_in_log', 0)}，抽奖 {counts.get('lottery_record', 0)}，兑换 {counts.get('redeem_records', 0)}",
+                f"  · 恢复群名片 {restored} 人（尽力而为）",
+            ]
+            if scope == "global":
+                lines.append(
+                    f"  · 物品 {counts.get('redeem_items', 0)}，日期奖励 {counts.get('date_rewards', 0)}，管理员 {counts.get('admins', 0)}，口令 {counts.get('daily_keyword', 0)}"
+                )
+            lines.append(
+                f"清空前备份: {backup_path}"
+                if backup_path
+                else "⚠️ 清空前备份失败，请手动确认数据安全"
+            )
+            yield event.plain_result("\n".join(lines))
+        except Exception as e:
+            logger.error(f"Confirm clear error: {e}")
+            yield event.plain_result("操作失败，已记录错误")
+
+    async def _do_clear(self, scope: str, group_id: Optional[str]) -> dict:
+        tables = _GROUP_CLEAR_TABLES if scope == "group" else _GLOBAL_CLEAR_TABLES
+        counts: dict[str, int] = {}
+
+        async def _tx(conn):
+            for table in tables:
+                if group_id:
+                    async with conn.execute(
+                        f"DELETE FROM {table} WHERE group_id=?", (group_id,)
+                    ) as cur:
+                        counts[table] = cur.rowcount
+                else:
+                    async with conn.execute(f"DELETE FROM {table}") as cur:
+                        counts[table] = cur.rowcount
+
+        await self._plugin.db.execute_transaction(_tx)
+
+        if scope == "global":
+            from ..db.schema import _seed_default_easter_events
+            await _seed_default_easter_events(self._plugin.db.conn)
+        return counts
+
+    async def _restore_negative_cards(self, bot, scope: str, group_id: Optional[str]) -> int:
+        if scope == "group":
+            rows = await self._plugin.db.fetchall(
+                "SELECT qq, group_id, negative_title_prev_card FROM users "
+                "WHERE negative_title_id IS NOT NULL AND group_id=?",
+                (group_id,),
+            )
+        else:
+            rows = await self._plugin.db.fetchall(
+                "SELECT qq, group_id, negative_title_prev_card FROM users "
+                "WHERE negative_title_id IS NOT NULL"
+            )
+        restored = 0
+        for r in rows:
+            try:
+                await self._plugin.point_service._set_group_card(
+                    bot, r["qq"], r["group_id"], r["negative_title_prev_card"] or ""
+                )
+                restored += 1
+            except Exception as e:
+                logger.warning(f"Restore group card failed for {r['qq']}: {e}")
+        return restored

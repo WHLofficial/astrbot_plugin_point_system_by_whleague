@@ -194,6 +194,7 @@ async def init_schema(db_manager):
 
     cur = await db.execute("SELECT value FROM plugin_config WHERE key='schema_version'")
     row = await cur.fetchone()
+    await cur.close()
     if row is None:
         await db.execute(
             "INSERT INTO plugin_config (key, value) VALUES ('schema_version', ?)",
@@ -203,7 +204,20 @@ async def init_schema(db_manager):
         await _seed_default_easter_events(db)
         logger.info("Database schema initialized (version %d).", SCHEMA_VERSION)
     else:
-        current = int(row["value"])
+        try:
+            current = int(row["value"])
+        except (ValueError, TypeError):
+            logger.warning(
+                "Invalid schema_version value %r, rewriting to %d.",
+                row["value"],
+                SCHEMA_VERSION,
+            )
+            await db.execute(
+                "UPDATE plugin_config SET value=?, updated_at=datetime('now','localtime') WHERE key='schema_version'",
+                (str(SCHEMA_VERSION),),
+            )
+            await db.commit()
+            current = SCHEMA_VERSION
         if current < SCHEMA_VERSION:
             await _migrate(db, current)
             await db.execute(

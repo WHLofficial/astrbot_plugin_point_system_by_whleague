@@ -42,9 +42,30 @@ class BackupService:
         return p
 
     async def _backup_to(self, dst_dir: Path):
-        """通过 VACUUM INTO 生成数据库一致快照（含 WAL 数据），避免复制不完整。"""
+        """通过 VACUUM INTO 生成数据库一致快照（含 WAL 数据），避免复制不完整。
+
+        目标文件已存在时（同日多次备份/时钟回拨）自动追加序号，避免失败或覆盖。
+        """
+        await self.backup_unique(dst_dir)
+
+    async def backup_unique(self, dst_dir: Path, tag: str = "") -> Path:
+        """生成唯一文件名的快照备份并返回目标路径。
+
+        Args:
+            dst_dir: 目标目录。
+            tag: 文件名附加标签（如 before_clear）。
+
+        Returns:
+            实际写入的备份文件路径。
+        """
         dst_dir.mkdir(parents=True, exist_ok=True)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        dst = dst_dir / f"points_system_{ts}.db"
+        suffix = f"_{tag}" if tag else ""
+        dst = dst_dir / f"points_system_{ts}{suffix}.db"
+        n = 2
+        while dst.exists():
+            dst = dst_dir / f"points_system_{ts}{suffix}_{n}.db"
+            n += 1
         escaped = str(dst).replace("'", "''")
         await self._db.execute(f"VACUUM INTO '{escaped}'")
+        return dst

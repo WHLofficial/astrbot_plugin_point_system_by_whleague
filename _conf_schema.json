@@ -65,11 +65,17 @@
     "type": "float",
     "default": 0.05
   },
-  "active_reward_points": {
-    "description": "活跃奖励积分",
-    "hint": "触发活跃奖励时获得的积分。",
+  "active_reward_points_min": {
+    "description": "活跃奖励积分下限",
+    "hint": "触发活跃奖励时随机获得的积分下限（闭区间）。",
     "type": "int",
     "default": 1
+  },
+  "active_reward_points_max": {
+    "description": "活跃奖励积分上限",
+    "hint": "触发活跃奖励时随机获得的积分上限（闭区间）。",
+    "type": "int",
+    "default": 5
   },
   "active_reward_cooldown": {
     "description": "活跃奖励冷却(秒)",
@@ -127,7 +133,7 @@
   },
   "signin_refresh_time": {
     "description": "每日刷新时间",
-    "hint": "签到/抽奖次数/今日口令等每日逻辑的刷新时刻，HH:MM 24 小时制，一天区间为该时刻至次日同一时刻。",
+    "hint": "签到/抽奖次数/今日口令等每日逻辑的刷新时刻，HH:MM 24 小时制（按宿主机时区），一天区间为该时刻至次日同一时刻。",
     "type": "string",
     "default": "04:00"
   },
@@ -139,7 +145,7 @@
   },
   "birthday_announce_time": {
     "description": "生日播报时间",
-    "hint": "每天播报生日祝福的时间，HH:MM 24 小时制。",
+    "hint": "每天播报生日祝福的时间，HH:MM 24 小时制（按宿主机时区）。",
     "type": "string",
     "default": "08:00"
   },
@@ -151,7 +157,7 @@
   },
   "backup_time": {
     "description": "每日备份时间",
-    "hint": "每天自动备份的时刻，HH:MM 24 小时制。",
+    "hint": "每天自动备份的时刻，HH:MM 24 小时制（按宿主机时区）。",
     "type": "string",
     "default": "04:00"
   },

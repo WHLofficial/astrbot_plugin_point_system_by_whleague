@@ -749,14 +749,13 @@ def format_fortune(qq, date_str, user_name) -> str:
 
 | 任务 | 调度方式 | Cron | 说明 |
 |---|---|---|---|
-| 备份 | APScheduler cron | `0 3 * * *` | 遍历 `backup_configs`，先 `wal_checkpoint` 再 copy db 到各目标 |
-| 生日播报 | APScheduler cron | config.birthday_announce_time | 扫描各组 birthday=今天 的用户，群内播报（查 birthday_announce_log 去重） |
+| 备份 | APScheduler cron | `config.backup_time` | 遍历 `backup_dirs`，`VACUUM INTO` 生成一致快照到各目标 |
 
 ### 定时任务注意事项
 
-- 时区使用 `Asia/Shanghai`，可在 `plugin_config` 中配置
+- 备份/生日播报/每日刷新统一按**宿主机本地时区**（cron 不指定时区，跟随系统）
 - `terminate()` 中清理所有定时任务
-- 备份前执行 `PRAGMA wal_checkpoint(TRUNCATE)` 确保数据完整性
+- 备份使用 `VACUUM INTO`（含 WAL 数据），目标已存在时自动追加序号
 - 备份目标目录不存在时自动创建
 
 ---

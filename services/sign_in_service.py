@@ -1,5 +1,6 @@
 import random
 from datetime import datetime
+from typing import Optional
 from astrbot.api import logger
 from ..utils.helpers import today_str, today_mmdd
 from ..utils.fortune import format_fortune
@@ -18,7 +19,7 @@ class SignInService:
         self._date_reward = date_reward_svc
         self._cfg = config_cache
 
-    async def sign_in(self, qq: str, group_id: str, platform: str, message: str, bot=None):
+    async def sign_in(self, qq: str, group_id: str, platform: str, message: str, bot=None, user_name: Optional[str] = None):
         today = today_str()
         mmdd = today_mmdd()
 
@@ -92,19 +93,19 @@ class SignInService:
 
         async def _tx(conn):
             # 事务内二次查重：并发签到只能有一个成功
-            cur = await conn.execute(
+            async with conn.execute(
                 "SELECT 1 FROM sign_in_log WHERE qq=? AND group_id=? AND sign_date=?",
                 (qq, group_id, today),
-            )
-            if await cur.fetchone():
-                raise AlreadySigned()
+            ) as cur:
+                if await cur.fetchone():
+                    raise AlreadySigned()
             # 每日首签判定移入事务：并发时只有真正第一个签到者获得奖励
-            cur = await conn.execute(
+            async with conn.execute(
                 "SELECT COUNT(*) AS cnt FROM sign_in_log WHERE group_id=? AND sign_date=?",
                 (group_id, today),
-            )
-            row = await cur.fetchone()
-            first_bonus = cfg["signin_day_first_bonus"] if row and row[0] == 0 else 0
+            ) as cur:
+                row = await cur.fetchone()
+                first_bonus = cfg["signin_day_first_bonus"] if row and row[0] == 0 else 0
             granted = total_points + first_bonus
             await conn.execute(
                 "INSERT INTO sign_in_log (qq, group_id, sign_date, points_earned, base_points, bonus_first_sign, bonus_day_first, bonus_consecutive, bonus_weekly, easter_event_type, easter_points) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
@@ -125,8 +126,8 @@ class SignInService:
                     "UPDATE users SET birthday_year=? WHERE qq=? AND group_id=?",
                     (current_year, qq, group_id),
                 )
-            cur = await conn.execute("SELECT points FROM users WHERE qq=? AND group_id=?", (qq, group_id))
-            row = await cur.fetchone()
+            async with conn.execute("SELECT points FROM users WHERE qq=? AND group_id=?", (qq, group_id)) as cur:
+                row = await cur.fetchone()
             balance = row[0] if row else granted
             await conn.execute(
                 "INSERT INTO point_transactions (qq, group_id, amount, balance_after, reason) VALUES (?,?,?,?,?)",
@@ -163,7 +164,7 @@ class SignInService:
         if birthday_bonus:
             parts.append(f"  \xb7 \U0001f382 \u751f\u65e5\u5956\u52b1: +{birthday_bonus}")
 
-        user_name = qq
+        user_name = user_name or qq
         fortune_text = format_fortune(qq, today, user_name)
 
         parts.append(fortune_text)

@@ -1,80 +1,63 @@
 import json
+import os
 import re
 
+_SCHEMA_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "_conf_schema.json"
+)
+
+_TYPE_DEFAULTS = {
+    "int": 0,
+    "float": 0.0,
+    "bool": False,
+    "string": "",
+    "text": "",
+    "list": [],
+    "file": [],
+    "object": {},
+    "template_list": [],
+    "dict": {},
+}
+
+_TYPE_MAP = {
+    "int": int,
+    "float": float,
+    "bool": bool,
+    "string": str,
+    "text": str,
+    "list": str,
+}
+
+
+def _load_schema() -> dict:
+    if not os.path.exists(_SCHEMA_PATH):
+        raise RuntimeError(f"缺少插件配置 schema 文件: {_SCHEMA_PATH}")
+    with open(_SCHEMA_PATH, encoding="utf-8") as f:
+        schema = json.load(f)
+    for key, meta in schema.items():
+        if meta.get("type") not in _TYPE_DEFAULTS:
+            raise RuntimeError(f"配置项 {key} 的类型 {meta.get('type')} 不受支持")
+    return schema
+
+
+_SCHEMA = _load_schema()
+
+# 默认值唯一来源为 _conf_schema.json（与 AstrBot WebUI 展示/校验一致）
 DEFAULT_CONFIG = {
-    "signin_fixed_mode": False,
-    "signin_fixed_points": 10,
-    "signin_random_min": 1,
-    "signin_random_max": 20,
-    "signin_first_bonus": 50,
-    "signin_day_first_bonus": 30,
-    "signin_consecutive_max": 30,
-    "signin_consecutive_bonus_per_day": 5,
-    "signin_weekly_bonus": 100,
-    "active_reward_enabled": True,
-    "active_reward_probability": 0.05,
-    "active_reward_points": 1,
-    "active_reward_cooldown": 60,
-    "active_reward_min_length": 3,
-    "active_reward_global_cooldown": 10,
-    "lottery_enabled": True,
-    "lottery_cost": 100,
-    "lottery_daily_limit": 10,
-    "lottery_passphrase": "whl",
-    "lottery_tiers": json.dumps({
-        "tiers": [
-            {"label": "特等奖", "weight": 1, "multiplier": 10.0, "emoji": "\U0001f451"},
-            {"label": "一等奖", "weight": 5, "multiplier": 5.0, "emoji": "\U0001f947"},
-            {"label": "二等奖", "weight": 15, "multiplier": 2.0, "emoji": "\U0001f948"},
-            {"label": "三等奖", "weight": 30, "multiplier": 1.2, "emoji": "\U0001f949"},
-            {"label": "参与奖", "weight": 49, "multiplier": 0.0, "emoji": "\u2728"},
-        ]
-    }),
-    "negative_disable_lottery": True,
-    "birthday_bonus_points": 100,
-    "birthday_announce_time": "08:00",
-    "signin_refresh_time": "04:00",
-    "backup_enabled": True,
-    "backup_time": "04:00",
-    "backup_dirs": json.dumps([]),
-    "keyword_sign": json.dumps(["\u7b7e\u5230", "sign", "\u6253\u5361"]),
-    "keyword_lottery": json.dumps(["\u62bd\u5956", "lottery"]),
+    key: meta.get("default", _TYPE_DEFAULTS[meta["type"]])
+    for key, meta in _SCHEMA.items()
 }
 
 TYPE_MAP = {
-    "signin_fixed_mode": bool,
-    "signin_fixed_points": int,
-    "signin_random_min": int,
-    "signin_random_max": int,
-    "signin_first_bonus": int,
-    "signin_day_first_bonus": int,
-    "signin_consecutive_max": int,
-    "signin_consecutive_bonus_per_day": int,
-    "signin_weekly_bonus": int,
-    "active_reward_enabled": bool,
-    "active_reward_probability": float,
-    "active_reward_points": int,
-    "active_reward_cooldown": int,
-    "active_reward_min_length": int,
-    "active_reward_global_cooldown": int,
-    "lottery_enabled": bool,
-    "lottery_cost": int,
-    "lottery_daily_limit": int,
-    "lottery_passphrase": str,
-    "lottery_tiers": str,
-    "negative_disable_lottery": bool,
-    "birthday_bonus_points": int,
-    "birthday_announce_time": str,
-    "signin_refresh_time": str,
-    "backup_enabled": bool,
-    "backup_time": str,
-    "backup_dirs": str,
-    "keyword_sign": str,
-    "keyword_lottery": str,
+    key: _TYPE_MAP[meta["type"]]
+    for key, meta in _SCHEMA.items()
 }
 
-_KEYWORD_KEYS = ("keyword_sign", "keyword_lottery")
-_LIST_KEYS = _KEYWORD_KEYS + ("backup_dirs",)
+_KEYWORD_KEYS = tuple(
+    key for key, meta in _SCHEMA.items()
+    if meta["type"] == "list" and key in ("keyword_sign", "keyword_lottery")
+)
+_LIST_KEYS = tuple(key for key, meta in _SCHEMA.items() if meta["type"] == "list")
 
 
 def parse_keyword_list(raw):
@@ -118,9 +101,10 @@ def validate_and_cast(key: str, raw: str):
         return lst
 
     if key in ("birthday_announce_time", "signin_refresh_time", "backup_time"):
-        if not re.match(r"^([01]\d|2[0-3]):[0-5]\d$", raw.strip()):
+        m = re.match(r"^([01]?\d|2[0-3]):([0-5]\d)$", raw.strip())
+        if not m:
             raise ValueError(f"{key} \u9700\u4e3a HH:MM \u683c\u5f0f")
-        return raw.strip()
+        return f"{int(m.group(1)):02d}:{int(m.group(2)):02d}"
 
     if key == "lottery_passphrase":
         s = raw.strip()

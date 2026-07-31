@@ -25,7 +25,10 @@ class PointDAO:
     async def create_user(self, qq: str, group_id: str, platform: str = ""):
         sql = "INSERT OR IGNORE INTO users (qq, group_id, platform) VALUES (?, ?, ?)"
         cur = await self._db.execute(sql, (qq, group_id, platform))
-        return cur.lastrowid
+        try:
+            return cur.lastrowid
+        finally:
+            await cur.close()
 
     async def ensure_user(self, qq: str, group_id: str, platform: str = ""):
         user = await self.get_user(qq, group_id)
@@ -107,7 +110,7 @@ class PointDAO:
             """SELECT u.qq, u.consecutive_days FROM users u
                INNER JOIN sign_in_log s ON u.qq=s.qq AND u.group_id=s.group_id
                WHERE u.group_id=? AND s.sign_date=?
-               ORDER BY u.consecutive_days DESC LIMIT 1""",
+               ORDER BY u.consecutive_days DESC, s.created_at ASC LIMIT 1""",
             (group_id, self._today_str()),
         )
 
@@ -149,7 +152,10 @@ class PointDAO:
             "INSERT INTO redeem_items (name, cost, stock, description) VALUES (?, ?, ?, ?)",
             (name, cost, stock, desc),
         )
-        return cur.lastrowid
+        try:
+            return cur.lastrowid
+        finally:
+            await cur.close()
 
     async def soft_delete_item(self, item_id: int):
         await self._db.execute(
@@ -172,25 +178,34 @@ class PointDAO:
         )
 
     async def get_redeem_records_by_user(
-        self, qq: str, limit: int = 10, offset: int = 0,
+        self, qq: str, group_id: Optional[str] = None, limit: int = 10, offset: int = 0,
     ):
+        if group_id:
+            return await self._db.fetchall(
+                "SELECT * FROM redeem_records WHERE qq=? AND group_id=? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                (qq, group_id, limit, offset),
+            )
         return await self._db.fetchall(
             "SELECT * FROM redeem_records WHERE qq=? ORDER BY created_at DESC LIMIT ? OFFSET ?",
             (qq, limit, offset),
         )
 
     async def get_redeem_records_all(
-        self, status: Optional[str] = None, limit: int = 10, offset: int = 0,
+        self, status: Optional[str] = None, group_id: Optional[str] = None,
+        limit: int = 10, offset: int = 0,
     ):
+        conditions = []
+        params = []
         if status:
-            return await self._db.fetchall(
-                "SELECT * FROM redeem_records WHERE status=? ORDER BY created_at DESC LIMIT ? OFFSET ?",
-                (status, limit, offset),
-            )
-        return await self._db.fetchall(
-            "SELECT * FROM redeem_records ORDER BY created_at DESC LIMIT ? OFFSET ?",
-            (limit, offset),
-        )
+            conditions.append("status=?")
+            params.append(status)
+        if group_id:
+            conditions.append("group_id=?")
+            params.append(group_id)
+        where = " AND ".join(conditions) if conditions else "1=1"
+        sql = f"SELECT * FROM redeem_records WHERE {where} ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+        return await self._db.fetchall(sql, params)
 
     async def toggle_redeem_status(self, record_no: str, admin_qq: str, note: str = ""):
         record = await self.get_redeem_record(record_no)
@@ -251,7 +266,10 @@ class PointDAO:
             "INSERT INTO date_rewards (start_date, end_date, keyword, points, probability, description) VALUES (?, ?, ?, ?, ?, '')",
             (start_date, end_date, keyword, points, probability),
         )
-        return cur.lastrowid
+        try:
+            return cur.lastrowid
+        finally:
+            await cur.close()
 
     async def soft_delete_date_reward(self, reward_id: int):
         await self._db.execute(
@@ -290,13 +308,24 @@ class PointDAO:
 
     async def set_daily_keyword(self, group_id: str, keyword: str, points: int, set_by: str):
         today = self._today_str()
+        # 使用 UPSERT 而非 INSERT OR REPLACE：REPLACE 会先 DELETE 旧行，
+        # 已被领取的 daily_keyword_claim 存在外键引用会导致约束失败
         await self._db.execute(
-            "INSERT OR REPLACE INTO daily_keyword (group_id, keyword, points, set_by, set_date) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO daily_keyword (group_id, keyword, points, set_by, set_date) "
+            "VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT(group_id, set_date) DO UPDATE SET "
+            "keyword=excluded.keyword, points=excluded.points, set_by=excluded.set_by",
             (group_id, keyword, points, set_by, today),
         )
 
     async def clear_daily_keyword(self, group_id: str):
         today = self._today_str()
+        # 先删领取记录再删口令，避免外键约束失败
+        await self._db.execute(
+            "DELETE FROM daily_keyword_claim WHERE kw_id IN "
+            "(SELECT id FROM daily_keyword WHERE group_id=? AND set_date=?)",
+            (group_id, today),
+        )
         await self._db.execute(
             "DELETE FROM daily_keyword WHERE group_id=? AND set_date=?", (group_id, today)
         )

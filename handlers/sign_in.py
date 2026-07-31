@@ -18,7 +18,11 @@ class SignInHandler:
             platform = event.get_platform_name()
             msg = event.get_message_str()
 
-            result = await self._plugin.sign_in_service.sign_in(qq, group_id, platform, msg, bot=getattr(event, "bot", None))
+            result = await self._plugin.sign_in_service.sign_in(
+                qq, group_id, platform, msg,
+                bot=getattr(event, "bot", None),
+                user_name=event.get_sender_name(),
+            )
             if result["already_signed"]:
                 yield event.plain_result(result["msg"])
                 return

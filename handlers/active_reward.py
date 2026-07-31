@@ -65,14 +65,17 @@ class ActiveRewardHandler:
             if is_neg:
                 return
 
-            points = cfg["active_reward_points"]
-            result = await self._plugin.point_service.add(
+            points = random.randint(
+                min(cfg["active_reward_points_min"], cfg["active_reward_points_max"]),
+                max(cfg["active_reward_points_min"], cfg["active_reward_points_max"]),
+            )
+            await self._plugin.point_service.add(
                 qq, group_id, points, "active_reward", bot=getattr(event, "bot", None)
             )
 
             await event.send(
                 MessageChain().message(
-                    f"\U0001f389 {event.get_sender_name()} \u53d1\u8a00\u83b7\u5f97 +{points} \u79ef\u5206\uff01\u5f53\u524d\u4f59\u989d: {result['balance']}"
+                    f"\U0001f389 \u606d\u559c\uff01{event.get_sender_name()}\u89e6\u53d1\u6d3b\u8dc3\u5956\u52b1 +{points} \u79ef\u5206"
                 )
             )
 

@@ -56,12 +56,12 @@ def is_date_in_range(target_mmdd: str, start: str, end: Optional[str] = None) ->
 async def generate_record_no(conn, date_prefix: Optional[str] = None) -> str:
     """在事务内生成兑换记录编号（并发安全：随事务持锁计数）。"""
     if date_prefix is None:
-        date_prefix = datetime.now().strftime("%Y%m%d")
+        date_prefix = today_str().replace("-", "")
     prefix = f"R{date_prefix}-"
-    cur = await conn.execute(
+    async with conn.execute(
         "SELECT COUNT(*) AS cnt FROM redeem_records WHERE record_no LIKE ?",
         (f"{prefix}%",),
-    )
-    row = await cur.fetchone()
+    ) as cur:
+        row = await cur.fetchone()
     count = row[0] if row else 0
     return f"{prefix}{count + 1:04d}"

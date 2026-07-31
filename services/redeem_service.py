@@ -56,18 +56,18 @@ class RedeemService:
             return {"success": False, "msg": f"\u79ef\u5206\u4e0d\u8db3\uff0c\u9700\u8981 {total_cost} \u79ef\u5206\uff0c\u5f53\u524d {balance}"}
 
         async def _tx(conn):
-            cur = await conn.execute(
+            async with conn.execute(
                 "UPDATE redeem_items SET stock=CASE WHEN stock=-1 THEN -1 ELSE stock-? END WHERE id=? AND (stock=-1 OR stock>=?)",
                 (quantity, item_id, quantity),
-            )
-            if cur.rowcount == 0:
-                raise ValueError("\u5e93\u5b58\u4e0d\u8db3")
+            ) as cur:
+                if cur.rowcount == 0:
+                    raise ValueError("\u5e93\u5b58\u4e0d\u8db3")
             # 余额守卫在事务内生效，防止并发兑换透支
-            cur = await conn.execute("UPDATE users SET points=points-? WHERE qq=? AND group_id=? AND points>=?", (total_cost, qq, group_id, total_cost))
-            if cur.rowcount == 0:
-                raise ValueError(f"\u79ef\u5206\u4e0d\u8db3\uff0c\u9700\u8981 {total_cost} \u79ef\u5206")
-            cur2 = await conn.execute("SELECT points FROM users WHERE qq=? AND group_id=?", (qq, group_id))
-            bal = (await cur2.fetchone())[0]
+            async with conn.execute("UPDATE users SET points=points-? WHERE qq=? AND group_id=? AND points>=?", (total_cost, qq, group_id, total_cost)) as cur:
+                if cur.rowcount == 0:
+                    raise ValueError(f"\u79ef\u5206\u4e0d\u8db3\uff0c\u9700\u8981 {total_cost} \u79ef\u5206")
+            async with conn.execute("SELECT points FROM users WHERE qq=? AND group_id=?", (qq, group_id)) as cur2:
+                bal = (await cur2.fetchone())[0]
             await conn.execute("INSERT INTO point_transactions (qq, group_id, amount, balance_after, reason) VALUES (?,?,?,?,?)", (qq, group_id, -total_cost, bal, "redeem_cost"))
             record_no = await generate_record_no(conn)
             await conn.execute("INSERT INTO redeem_records (record_no, qq, group_id, item_id, item_name, item_cost, quantity) VALUES (?,?,?,?,?,?,?)", (record_no, qq, group_id, item_id, item["name"], total_cost, quantity))

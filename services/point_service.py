@@ -1,6 +1,12 @@
 from typing import Optional
 from astrbot.api import logger
 
+# 不计入 total_earned（累计获得）的加分 reason：均为"扣减型"操作（消耗/扣除/负彩蛋），
+# 经 add() 传入时必须显式列在此处，否则会虚增累计获得。
+_EARNED_EXCLUDED_REASONS = frozenset(
+    {"lottery_cost", "redeem_cost", "admin_sub", "easter_unlucky"}
+)
+
 
 class PointService:
     def __init__(self, db, dao):
@@ -16,7 +22,7 @@ class PointService:
             raise ValueError("Amount must be positive")
         result = {"qq": qq, "group_id": group_id, "amount": amount, "reason": reason}
 
-        add_to_earned = reason not in ("lottery_cost", "redeem_cost", "admin_sub", "easter_unlucky")
+        add_to_earned = reason not in _EARNED_EXCLUDED_REASONS
 
         async def _tx(conn):
             # 从未签到过的用户无 users 行，先补建再加分，防止积分丢失
@@ -34,8 +40,8 @@ class PointService:
                     "UPDATE users SET points=points+?, updated_at=datetime('now','localtime') WHERE qq=? AND group_id=?",
                     (amount, qq, group_id),
                 )
-            cur = await conn.execute("SELECT points FROM users WHERE qq=? AND group_id=?", (qq, group_id))
-            row = await cur.fetchone()
+            async with conn.execute("SELECT points FROM users WHERE qq=? AND group_id=?", (qq, group_id)) as cur:
+                row = await cur.fetchone()
             balance = row[0] if row else 0
             await conn.execute(
                 "INSERT INTO point_transactions (qq, group_id, amount, balance_after, reason, ref_id, admin_qq) VALUES (?,?,?,?,?,?,?)",
@@ -63,10 +69,10 @@ class PointService:
         result = {"qq": qq, "group_id": group_id, "amount": -amount, "reason": reason}
 
         async def _tx(conn):
-            cur = await conn.execute(
+            async with conn.execute(
                 "SELECT points FROM users WHERE qq=? AND group_id=?", (qq, group_id)
-            )
-            row = await cur.fetchone()
+            ) as cur:
+                row = await cur.fetchone()
             balance = row[0] if row else 0
             if balance < amount:
                 raise ValueError(f"Insufficient points: have {balance}, need {amount}")
@@ -119,11 +125,11 @@ class PointService:
         prev_card = await self._fetch_group_card(bot, qq, group_id)
 
         async def _tx(conn):
-            cur = await conn.execute(
+            async with conn.execute(
                 "SELECT negative_title_id FROM users WHERE group_id=? AND negative_title_id IS NOT NULL",
                 (group_id,),
-            )
-            rows = await cur.fetchall()
+            ) as cur:
+                rows = await cur.fetchall()
             used = {r[0] for r in rows}
             new_id = 1
             while new_id in used:

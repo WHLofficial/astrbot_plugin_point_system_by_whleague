@@ -21,11 +21,12 @@ _PLUGIN_COMMANDS = frozenset({
     "\u6dfb\u52a0\u7ba1\u7406", "\u5220\u9664\u7ba1\u7406", "\u6dfb\u52a0\u65e5\u671f\u5956\u52b1",
     "\u5220\u9664\u65e5\u671f\u5956\u52b1", "\u67e5\u770b\u65e5\u671f\u5956\u52b1",
     "\u8bbe\u7f6e\u751f\u65e5", "\u67e5\u751f\u65e5", "\u6d41\u6c34",
+    "\u6e05\u7a7a\u6570\u636e", "\u6e05\u7a7a\u5168\u90e8\u6570\u636e", "\u786e\u8ba4\u6e05\u7a7a",
 })
 
 
 @register("points_system", "WHLofficial",
-          "\u79ef\u5206\u7cfb\u7edf\u63d2\u4ef6\uff1a\u7b7e\u5230/\u62bd\u5956/\u5151\u6362/\u6392\u884c/\u751f\u65e5\u7b49", "0.0.4")
+          "\u79ef\u5206\u7cfb\u7edf\u63d2\u4ef6\uff1a\u7b7e\u5230/\u62bd\u5956/\u5151\u6362/\u6392\u884c/\u751f\u65e5\u7b49", "0.1.0")
 class PointSystemPlugin(Star):
     def __init__(self, context: Context, config: dict | None = None):
         super().__init__(context)
@@ -169,10 +170,9 @@ class PointSystemPlugin(Star):
                     cron_expression=f"{backup_minute} {backup_hour} * * *",
                     handler=self._cron_backup,
                     description="Daily point system backup",
-                    timezone="Asia/Shanghai",
                 )
                 self._backup_job = job
-                logger.info(f"Backup cron job scheduled at {backup_time} daily.")
+                logger.info(f"Backup cron job scheduled at {backup_time} (host local time).")
 
             announce_time = cfg.get("birthday_announce_time", "08:00")
             hour, minute = announce_time.split(":")
@@ -182,7 +182,6 @@ class PointSystemPlugin(Star):
                 cron_expression=cron_expr,
                 handler=self._cron_birthday_announce,
                 description="Daily birthday announcement",
-                timezone="Asia/Shanghai",
             )
             self._birthday_job = job2
             logger.info(f"Birthday announce cron job scheduled at {announce_time}.")
@@ -379,6 +378,21 @@ class PointSystemPlugin(Star):
     @filter.command("\u67e5\u770b\u65e5\u671f\u5956\u52b1")
     async def cmd_view_date_rewards(self, event: AstrMessageEvent) -> AsyncGenerator[MessageEventResult, None]:
         async for r in self.admin_handler.view_date_rewards(event):
+            yield r
+
+    @filter.command("\u6e05\u7a7a\u6570\u636e")
+    async def cmd_clear_data(self, event: AstrMessageEvent) -> AsyncGenerator[MessageEventResult, None]:
+        async for r in self.admin_handler.clear_data(event, "group"):
+            yield r
+
+    @filter.command("\u6e05\u7a7a\u5168\u90e8\u6570\u636e")
+    async def cmd_clear_all(self, event: AstrMessageEvent) -> AsyncGenerator[MessageEventResult, None]:
+        async for r in self.admin_handler.clear_data(event, "global"):
+            yield r
+
+    @filter.command("\u786e\u8ba4\u6e05\u7a7a")
+    async def cmd_confirm_clear(self, event: AstrMessageEvent) -> AsyncGenerator[MessageEventResult, None]:
+        async for r in self.admin_handler.confirm_clear(event):
             yield r
 
     # ═══════════════════════════════════════════════════════════

@@ -6,6 +6,10 @@ class AlreadyClaimed(Exception):
     """并发下重复领取口令，用于回滚事务。"""
 
 
+class BlockedClaim(Exception):
+    """负分用户领取口令被拦截，用于回滚事务。"""
+
+
 class DailyKeywordService:
     def __init__(self, db, dao, point_svc):
         self._db = db
@@ -49,26 +53,35 @@ class DailyKeywordService:
 
         async def _tx(conn):
             # 事务内以 rowcount 判定，防止并发重复领取
-            cur = await conn.execute(
+            async with conn.execute(
                 "INSERT OR IGNORE INTO daily_keyword_claim (kw_id, qq, group_id, points_earned) VALUES (?,?,?,?)",
                 (kw_record["id"], qq, group_id, points),
-            )
-            if cur.rowcount == 0:
-                raise AlreadyClaimed()
+            ) as cur:
+                if cur.rowcount == 0:
+                    raise AlreadyClaimed()
+            # 事务内负分拦截：与事务外快速检查互补，消除竞态窗口
+            async with conn.execute(
+                "SELECT points FROM users WHERE qq=? AND group_id=?", (qq, group_id)
+            ) as cur:
+                row = await cur.fetchone()
+            if row and row["points"] < 0:
+                raise BlockedClaim()
             # 未签到过的用户无 users 行，先补建再加分
             await conn.execute(
                 "INSERT OR IGNORE INTO users (qq, group_id) VALUES (?, ?)",
                 (qq, group_id),
             )
             await conn.execute("UPDATE users SET points=points+?, total_earned=total_earned+?, updated_at=datetime('now','localtime') WHERE qq=? AND group_id=?", (points, points, qq, group_id))
-            cur = await conn.execute("SELECT points FROM users WHERE qq=? AND group_id=?", (qq, group_id))
-            bal = (await cur.fetchone())[0]
+            async with conn.execute("SELECT points FROM users WHERE qq=? AND group_id=?", (qq, group_id)) as cur:
+                bal = (await cur.fetchone())[0]
             await conn.execute("INSERT INTO point_transactions (qq, group_id, amount, balance_after, reason) VALUES (?,?,?,?,?)", (qq, group_id, points, bal, "daily_keyword"))
 
         try:
             await self._db.execute_transaction(_tx)
         except AlreadyClaimed:
             return {"claimed": False, "already": True}
+        except BlockedClaim:
+            return {"claimed": False, "blocked": True}
 
         await self._point.ensure_negative_title(qq, group_id, bot=bot)
 

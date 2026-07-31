@@ -56,27 +56,27 @@ class LotteryService:
 
         async def _tx(conn):
             if daily_limit > 0:
-                cur = await conn.execute(
+                async with conn.execute(
                     "SELECT COUNT(*) AS cnt FROM lottery_record WHERE qq=? AND group_id=? AND created_at>=?",
                     (qq, group_id, period_start_str()),
-                )
-                row = await cur.fetchone()
+                ) as cur:
+                    row = await cur.fetchone()
                 if row and row[0] >= daily_limit:
                     raise LotteryError(f"\u4eca\u65e5\u62bd\u5956\u6b21\u6570\u5df2\u8fbe\u4e0a\u9650 ({daily_limit} \u6b21)")
             # 余额守卫在事务内生效，防止并发抽奖透支
-            cur = await conn.execute(
+            async with conn.execute(
                 "UPDATE users SET points=points-? WHERE qq=? AND group_id=? AND points>=?",
                 (cost, qq, group_id, cost),
-            )
-            if cur.rowcount == 0:
-                raise LotteryError(f"\u79ef\u5206\u4e0d\u8db3\uff0c\u9700\u8981 {cost} \u79ef\u5206")
-            cur = await conn.execute("SELECT points FROM users WHERE qq=? AND group_id=?", (qq, group_id))
-            bal1 = (await cur.fetchone())[0]
+            ) as cur:
+                if cur.rowcount == 0:
+                    raise LotteryError(f"\u79ef\u5206\u4e0d\u8db3\uff0c\u9700\u8981 {cost} \u79ef\u5206")
+            async with conn.execute("SELECT points FROM users WHERE qq=? AND group_id=?", (qq, group_id)) as cur:
+                bal1 = (await cur.fetchone())[0]
             await conn.execute("INSERT INTO point_transactions (qq, group_id, amount, balance_after, reason) VALUES (?,?,?,?,?)", (qq, group_id, -cost, bal1, "lottery_cost"))
             if reward > 0:
                 await conn.execute("UPDATE users SET points=points+?, total_earned=total_earned+? WHERE qq=? AND group_id=?", (reward, reward, qq, group_id))
-                cur2 = await conn.execute("SELECT points FROM users WHERE qq=? AND group_id=?", (qq, group_id))
-                bal2 = (await cur2.fetchone())[0]
+                async with conn.execute("SELECT points FROM users WHERE qq=? AND group_id=?", (qq, group_id)) as cur2:
+                    bal2 = (await cur2.fetchone())[0]
                 await conn.execute("INSERT INTO point_transactions (qq, group_id, amount, balance_after, reason) VALUES (?,?,?,?,?)", (qq, group_id, reward, bal2, "lottery_reward"))
             await conn.execute("INSERT INTO lottery_record (qq, group_id, cost, reward_amount, is_win, tier_label) VALUES (?,?,?,?,?,?)", (qq, group_id, cost, reward, 1 if is_win else 0, chosen["label"]))
 

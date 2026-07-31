@@ -162,7 +162,7 @@ async def bench_lottery():
         cfg = {
             "lottery_enabled": True, "lottery_cost": 10, "lottery_daily_limit": 0,
             "lottery_passphrase": "whl", "negative_disable_lottery": True,
-            "lottery_tiers": json.dumps({"tiers": [{"label": "参与奖", "weight": 1, "multiplier": 0.0, "emoji": ""}]}),
+            "lottery_tiers": json.dumps({"tiers": [{"label": "参与奖", "weight": 1, "points_min": 0, "points_max": 0, "emoji": ""}]}),
         }
         from astrbot_plugin_point_system_by_whleague.services.point_service import PointService
         from astrbot_plugin_point_system_by_whleague.services.lottery_service import LotteryService

@@ -331,7 +331,7 @@ CREATE TABLE IF NOT EXISTS plugin_config (
 | active_reward_global_cooldown | int | 10 | 全群全局冷却秒数 |
 | **抽奖** | | | |
 | lottery_enabled | bool | true | 开关 |
-| lottery_cost | int | 100 | 单次消耗积分 |
+| lottery_cost | int | 20 | 单次消耗积分 |
 | lottery_passphrase | str | "whl" | 抽奖口令 |
 | lottery_tiers | json | (见下) | 五档配置 |
 | **负分** | | | |
@@ -350,16 +350,16 @@ CREATE TABLE IF NOT EXISTS plugin_config (
 ```json
 {
   "tiers": [
-    {"label":"特等奖", "weight":1,  "multiplier":10.0, "emoji":"👑"},
-    {"label":"一等奖", "weight":5,  "multiplier":5.0,  "emoji":"🥇"},
-    {"label":"二等奖", "weight":15, "multiplier":2.0,  "emoji":"🥈"},
-    {"label":"三等奖", "weight":30, "multiplier":1.2,  "emoji":"🥉"},
-    {"label":"参与奖", "weight":49, "multiplier":0.0,  "emoji":"💫"}
+    {"label":"特等奖", "weight":2,  "points_min":100, "points_max":100, "emoji":"👑"},
+    {"label":"一等奖", "weight":18, "points_min":31,  "points_max":45,  "emoji":"🥇"},
+    {"label":"二等奖", "weight":37.5, "points_min":21, "points_max":30, "emoji":"🥈"},
+    {"label":"三等奖", "weight":27.5, "points_min":11, "points_max":20, "emoji":"🥉"},
+    {"label":"四等奖", "weight":15, "points_min":1,  "points_max":10,  "emoji":"💫"}
   ]
 }
 ```
 
-权重决定概率，`reward = cost × multiplier`，参与奖 ×0.0 即消耗不返还。
+权重决定概率，命中档位后在 `points_min` ~ `points_max` 闭区间内随机获得积分。
 
 ---
 
@@ -586,8 +586,8 @@ cumulative = 0
 for tier in tiers:
     cumulative += tier.weight
     if rand < cumulative:
-        reward = int(lottery_cost * tier.multiplier)
-        # reward = cost × multiplier, 参与奖 ×0.0
+        reward = randint(tier.points_min, tier.points_max)
+        # reward = 档位内随机积分（闭区间）
         point_service.subtract(qq, group_id, lottery_cost, reason="lottery_cost")
         point_service.add(qq, group_id, reward, reason="lottery_reward")
         break

@@ -1,6 +1,6 @@
 # 积分系统插件 by WHLeague
 
-> 一个功能完整的群聊积分系统，支持签到、抽奖、兑换、排行、生日、口令等多项功能。当前版本 **v0.1.0**。
+> 一个功能完整的群聊积分系统，支持签到、抽奖、兑换、排行、生日、口令等多项功能。当前版本 **v0.1.1**。
 
 ## 功能列表
 
@@ -156,10 +156,10 @@ whl抽奖
 | active_reward_global_cooldown | int | 10 | 全群全局冷却秒数 |
 | **抽奖** | | | |
 | lottery_enabled | bool | true | 开关 |
-| lottery_cost | int | 100 | 单次消耗积分 |
+| lottery_cost | int | 20 | 单次消耗积分 |
 | lottery_daily_limit | int | 10 | 每日抽奖次数上限 |
 | lottery_passphrase | str | whl | 抽奖口令 |
-| lottery_tiers | json | (五档) | 权重+倍率+标签+emoji |
+| lottery_tiers | json | (五档) | 权重+固定积分区间+标签+emoji |
 | **负分** | | | |
 | negative_disable_lottery | bool | true | 负分禁止抽奖 |
 | **生日** | | | |
@@ -178,16 +178,16 @@ whl抽奖
 ```json
 {
   "tiers": [
-    {"label":"特等奖", "weight":1,  "multiplier":10.0, "emoji":"👑"},
-    {"label":"一等奖", "weight":5,  "multiplier":5.0,  "emoji":"🥇"},
-    {"label":"二等奖", "weight":15, "multiplier":2.0,  "emoji":"🥈"},
-    {"label":"三等奖", "weight":30, "multiplier":1.2,  "emoji":"🥉"},
-    {"label":"参与奖", "weight":49, "multiplier":0.0,  "emoji":"💫"}
+    {"label":"特等奖", "weight":2,  "points_min":100, "points_max":100, "emoji":"👑"},
+    {"label":"一等奖", "weight":18, "points_min":31,  "points_max":45,  "emoji":"🥇"},
+    {"label":"二等奖", "weight":37.5, "points_min":21, "points_max":30, "emoji":"🥈"},
+    {"label":"三等奖", "weight":27.5, "points_min":11, "points_max":20, "emoji":"🥉"},
+    {"label":"四等奖", "weight":15, "points_min":1,  "points_max":10,  "emoji":"💫"}
   ]
 }
 ```
 
-权重决定概率，`奖励 = 消耗 × 倍率`，参与奖 ×0.0 即消耗不返还。
+权重决定概率，命中档位后在 `points_min` ~ `points_max` 闭区间内随机获得积分。
 
 ## 数据存储
 

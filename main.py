@@ -26,7 +26,7 @@ _PLUGIN_COMMANDS = frozenset({
 
 
 @register("points_system", "WHLofficial",
-          "\u79ef\u5206\u7cfb\u7edf\u63d2\u4ef6\uff1a\u7b7e\u5230/\u62bd\u5956/\u5151\u6362/\u6392\u884c/\u751f\u65e5\u7b49", "0.1.0")
+          "\u79ef\u5206\u7cfb\u7edf\u63d2\u4ef6\uff1a\u7b7e\u5230/\u62bd\u5956/\u5151\u6362/\u6392\u884c/\u751f\u65e5\u7b49", "0.1.1")
 class PointSystemPlugin(Star):
     def __init__(self, context: Context, config: dict | None = None):
         super().__init__(context)

@@ -105,7 +105,7 @@
     "description": "抽奖消耗积分",
     "hint": "每次抽奖消耗的积分。",
     "type": "int",
-    "default": 100
+    "default": 20
   },
   "lottery_daily_limit": {
     "description": "每日抽奖次数上限",
@@ -121,9 +121,9 @@
   },
   "lottery_tiers": {
     "description": "抽奖档位",
-    "hint": "JSON 格式，如 {\"tiers\": [{\"label\": \"特等奖\", \"weight\": 1, \"multiplier\": 10, \"emoji\": \"👑\"}]}，weight 为权重、multiplier 为奖励倍数。",
+    "hint": "JSON 格式，如 {\"tiers\": [{\"label\": \"特等奖\", \"weight\": 1, \"points_min\": 100, \"points_max\": 100, \"emoji\": \"👑\"}]}，weight 为权重、points_min/points_max 为该档奖励积分的随机区间（闭区间）。",
     "type": "text",
-    "default": "{\"tiers\": [{\"label\": \"特等奖\", \"weight\": 1, \"multiplier\": 10.0, \"emoji\": \"\\ud83d\\udc51\"}, {\"label\": \"一等奖\", \"weight\": 5, \"multiplier\": 5.0, \"emoji\": \"\\ud83e\\udd47\"}, {\"label\": \"二等奖\", \"weight\": 15, \"multiplier\": 2.0, \"emoji\": \"\\ud83e\\udd48\"}, {\"label\": \"三等奖\", \"weight\": 30, \"multiplier\": 1.2, \"emoji\": \"\\ud83e\\udd49\"}, {\"label\": \"参与奖\", \"weight\": 49, \"multiplier\": 0.0, \"emoji\": \"\\u2728\"}]}"
+    "default": "{\"tiers\": [{\"label\": \"特等奖\", \"weight\": 2, \"points_min\": 100, \"points_max\": 100, \"emoji\": \"\\ud83d\\udc51\"}, {\"label\": \"一等奖\", \"weight\": 18, \"points_min\": 31, \"points_max\": 45, \"emoji\": \"\\ud83e\\udd47\"}, {\"label\": \"二等奖\", \"weight\": 37.5, \"points_min\": 21, \"points_max\": 30, \"emoji\": \"\\ud83e\\udd48\"}, {\"label\": \"三等奖\", \"weight\": 27.5, \"points_min\": 11, \"points_max\": 20, \"emoji\": \"\\ud83e\\udd49\"}, {\"label\": \"四等奖\", \"weight\": 15, \"points_min\": 1, \"points_max\": 10, \"emoji\": \"\\u2728\"}]}"
   },
   "negative_disable_lottery": {
     "description": "负积分禁止抽奖",

@@ -49,7 +49,7 @@ class LotteryService:
                 chosen = t
                 break
 
-        reward = int(cost * chosen["multiplier"])
+        reward = random.randint(int(chosen["points_min"]), int(chosen["points_max"]))
         is_win = reward > 0
 
         daily_limit = self._cfg["lottery_daily_limit"]

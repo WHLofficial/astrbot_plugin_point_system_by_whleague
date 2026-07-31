@@ -134,8 +134,8 @@ async def test_lottery_tiers_and_limit():
             "lottery_passphrase": "whl", "negative_disable_lottery": True,
             "lottery_tiers": json.dumps({
                 "tiers": [
-                    {"label": "一等奖", "weight": 1, "multiplier": 2.0, "emoji": "🏆"},
-                    {"label": "参与奖", "weight": 99, "multiplier": 0.0, "emoji": "✨"},
+                    {"label": "一等奖", "weight": 1, "points_min": 30, "points_max": 30, "emoji": "🏆"},
+                    {"label": "参与奖", "weight": 99, "points_min": 0, "points_max": 0, "emoji": "✨"},
                 ]
             }),
         }
@@ -306,9 +306,11 @@ async def test_config_validate_full():
         except ValueError:
             pass
     # lottery_tiers 恶意输入
-    for bad in ("not json", "{}", '{"tiers":[]}', '{"tiers":[{"weight":1,"multiplier":0}]}',
-                '{"tiers":[{"label":"x","weight":0,"multiplier":1}]}',
-                '{"tiers":[{"label":"x","weight":1,"multiplier":101}]}'):
+    for bad in ("not json", "{}", '{"tiers":[]}', '{"tiers":[{"weight":1,"points_min":1,"points_max":5}]}',
+                '{"tiers":[{"label":"x","weight":0,"points_min":1,"points_max":5}]}',
+                '{"tiers":[{"label":"x","weight":1,"points_min":5,"points_max":1}]}',
+                '{"tiers":[{"label":"x","weight":1,"points_min":-1,"points_max":5}]}',
+                '{"tiers":[{"label":"x","weight":1,"multiplier":2}]}'):
         try:
             validate_and_cast("lottery_tiers", bad)
             raise AssertionError(bad)

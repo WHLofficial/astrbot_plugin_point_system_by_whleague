@@ -128,15 +128,21 @@ def validate_and_cast(key: str, raw: str):
                 if not isinstance(label, str) or not label.strip():
                     raise ValueError
                 weight = t.get("weight")
-                multiplier = t.get("multiplier")
+                points_min = t.get("points_min")
+                points_max = t.get("points_max")
                 if not isinstance(weight, (int, float)) or weight <= 0:
                     raise ValueError
-                if not isinstance(multiplier, (int, float)) or multiplier < 0:
-                    raise ValueError
-                if multiplier > 100:
+                if (
+                    not isinstance(points_min, int)
+                    or not isinstance(points_max, int)
+                    or isinstance(points_min, bool)
+                    or isinstance(points_max, bool)
+                    or points_min < 0
+                    or points_max < points_min
+                ):
                     raise ValueError
         except (json.JSONDecodeError, ValueError):
-            raise ValueError('lottery_tiers \u9700\u4e3a\u5408\u6cd5 JSON ({"tiers": [{"label": "...", "weight": >0, "multiplier": 0~100, ...}]})')
+            raise ValueError('lottery_tiers \u9700\u4e3a\u5408\u6cd5 JSON ({"tiers": [{"label": "...", "weight": >0, "points_min": 0~points_max, "points_max": int, ...}]})')
         return raw
 
     t = TYPE_MAP.get(key, str)

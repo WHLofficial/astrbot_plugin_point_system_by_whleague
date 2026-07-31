@@ -30,7 +30,7 @@
     "default": 50
   },
   "signin_day_first_bonus": {
-    "description": "每日首个签到奖励",
+    "description": "每日首位签到奖励",
     "hint": "每天第一个签到的人获得的额外积分。",
     "type": "int",
     "default": 30

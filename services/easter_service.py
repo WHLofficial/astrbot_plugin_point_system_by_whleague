@@ -6,7 +6,8 @@ class EasterService:
     def __init__(self, dao):
         self._dao = dao
 
-    async def trigger(self, qq: str, group_id: str, lucky_pity: int, unlucky_pity: int):
+    async def trigger(self, qq: str, group_id: str, lucky_pity: int, unlucky_pity: int) -> dict:
+        """计算彩蛋结果与新的保底计数，不写库（写入由调用方在事务内完成）。"""
         events = await self._dao.get_active_easter_events()
         lucky_events = [e for e in events if e["event_type"] == "lucky"]
         unlucky_events = [e for e in events if e["event_type"] == "unlucky"]
@@ -49,17 +50,23 @@ class EasterService:
         if reset_unlucky:
             new_unlucky_pity = 0
 
-        await self._dao.update_pity(qq, group_id, new_lucky_pity, new_unlucky_pity)
-
         if selected is None:
-            return None
+            return {
+                "event": None,
+                "lucky_pity": new_lucky_pity,
+                "unlucky_pity": new_unlucky_pity,
+            }
 
         points = random.randint(selected["points_min"], selected["points_max"])
         logger.info(
             f"Easter event '{selected['name']}' for {qq}@{group_id}: {points} points"
         )
         return {
-            "event_type": selected["event_type"],
-            "name": selected["name"],
-            "points": points,
+            "event": {
+                "event_type": selected["event_type"],
+                "name": selected["name"],
+                "points": points,
+            },
+            "lucky_pity": new_lucky_pity,
+            "unlucky_pity": new_unlucky_pity,
         }

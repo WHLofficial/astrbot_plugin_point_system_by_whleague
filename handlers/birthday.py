@@ -1,12 +1,14 @@
+from collections.abc import AsyncGenerator
 from astrbot.api import logger
-from utils.security import parse_birthday
+from astrbot.api.event import MessageEventResult
+from ..utils.security import parse_birthday
 
 
 class BirthdayHandler:
     def __init__(self, plugin):
         self._plugin = plugin
 
-    async def set_birthday(self, event):
+    async def set_birthday(self, event) -> AsyncGenerator[MessageEventResult, None]:
         try:
             qq = event.get_sender_id()
             group_id = event.get_group_id()
@@ -28,7 +30,7 @@ class BirthdayHandler:
             logger.error(f"Set birthday error: {e}")
             yield event.plain_result("\u8bbe\u7f6e\u5931\u8d25\uff0c\u5df2\u8bb0\u5f55\u9519\u8bef")
 
-    async def query_birthday(self, event):
+    async def query_birthday(self, event) -> AsyncGenerator[MessageEventResult, None]:
         try:
             group_id = event.get_group_id()
             msg = event.get_message_str()
@@ -36,8 +38,10 @@ class BirthdayHandler:
 
             parts = msg.split()
             if len(parts) >= 2:
-                from utils.security import parse_qq
-                target_qq = parse_qq(parts[1])
+                from ..utils.security import parse_qq, parse_qq_arg
+                target_qq = parse_qq_arg(parts[1])
+                if target_qq is None:
+                    target_qq = parse_qq(parts[1])
 
             user = await self._plugin.dao.get_user(target_qq, group_id)
             if not user or not user["birthday"]:

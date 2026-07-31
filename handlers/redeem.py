@@ -1,12 +1,15 @@
+from collections.abc import AsyncGenerator
+from typing import Optional
 from astrbot.api import logger
-from utils.security import parse_int
+from astrbot.api.event import MessageEventResult
+from ..utils.security import parse_int
 
 
 class RedeemHandler:
     def __init__(self, plugin):
         self._plugin = plugin
 
-    async def list_items(self, event):
+    async def list_items(self, event) -> AsyncGenerator[MessageEventResult, None]:
         try:
             items = await self._plugin.redeem_service.list_items()
             if not items:
@@ -26,7 +29,7 @@ class RedeemHandler:
             logger.error(f"List items error: {e}")
             yield event.plain_result("\u67e5\u8be2\u5931\u8d25\uff0c\u5df2\u8bb0\u5f55\u9519\u8bef")
 
-    async def do_redeem(self, event, item_id_str: str, quantity_str: str = "1"):
+    async def do_redeem(self, event, item_id_str: str, quantity_str: str = "1") -> AsyncGenerator[MessageEventResult, None]:
         try:
             qq = event.get_sender_id()
             group_id = event.get_group_id()
@@ -35,7 +38,7 @@ class RedeemHandler:
                 return
             item_id = parse_int(item_id_str, min_val=1)
             quantity = parse_int(quantity_str, min_val=1, max_val=999)
-            result = await self._plugin.redeem_service.redeem(qq, group_id, item_id, quantity)
+            result = await self._plugin.redeem_service.redeem(qq, group_id, item_id, quantity, bot=getattr(event, "bot", None))
             yield event.plain_result(result["msg"])
         except ValueError as e:
             yield event.plain_result(str(e))
@@ -43,7 +46,7 @@ class RedeemHandler:
             logger.error(f"Redeem error: {e}")
             yield event.plain_result("\u5151\u6362\u5931\u8d25\uff0c\u5df2\u8bb0\u5f55\u9519\u8bef")
 
-    async def list_records(self, event, target: str = None, page_str: str = "1"):
+    async def list_records(self, event, target: Optional[str] = None, page_str: str = "1") -> AsyncGenerator[MessageEventResult, None]:
         try:
             qq = event.get_sender_id()
             group_id = event.get_group_id()
@@ -93,19 +96,22 @@ class RedeemHandler:
             logger.error(f"List records error: {e}")
             yield event.plain_result("\u67e5\u8be2\u5931\u8d25\uff0c\u5df2\u8bb0\u5f55\u9519\u8bef")
 
-    async def toggle_verify(self, event, record_no: str):
+    async def toggle_verify(self, event, record_no: str, note: str = "") -> AsyncGenerator[MessageEventResult, None]:
         try:
             qq = event.get_sender_id()
-            msg = event.get_message_str()
-            note = ""
-            parts = msg.split(maxsplit=2)
-            if len(parts) >= 3:
-                note = parts[2]
+            if not await self._check_admin(event):
+                yield event.plain_result("\u4f60\u6ca1\u6709\u6743\u9650\u6267\u884c\u6b64\u64cd\u4f5c")
+                return
 
-            new_status = await self._plugin.dao.toggle_redeem_status(record_no, qq, note)
-            if new_status is None:
+            record = await self._plugin.dao.get_redeem_record(record_no)
+            if not record:
                 yield event.plain_result(f"\u8bb0\u5f55 {record_no} \u4e0d\u5b58\u5728")
                 return
+            if record["group_id"] != event.get_group_id():
+                yield event.plain_result("\u4f60\u65e0\u6743\u6838\u9500\u5176\u4ed6\u7fa4\u7684\u8bb0\u5f55")
+                return
+
+            new_status = await self._plugin.dao.toggle_redeem_status(record_no, qq, note)
             status_text = "\u2714 \u5df2\u6838\u9500" if new_status == "verified" else "\u23f3 \u5df2\u53d6\u6d88\u6838\u9500"
             yield event.plain_result(f"\u8bb0\u5f55 {record_no} \u72b6\u6001\u5df2\u66f4\u6539\u4e3a: {status_text}")
         except Exception as e:

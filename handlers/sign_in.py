@@ -1,12 +1,14 @@
+from collections.abc import AsyncGenerator
 from astrbot.api import logger
-from utils.keyword_matcher import is_signin_message
+from astrbot.api.event import MessageEventResult
+from ..utils.keyword_matcher import is_signin_message
 
 
 class SignInHandler:
     def __init__(self, plugin):
         self._plugin = plugin
 
-    async def handle(self, event):
+    async def handle(self, event) -> AsyncGenerator[MessageEventResult, None]:
         try:
             qq = event.get_sender_id()
             group_id = event.get_group_id()
@@ -16,7 +18,7 @@ class SignInHandler:
             platform = event.get_platform_name()
             msg = event.get_message_str()
 
-            result = await self._plugin.sign_in_service.sign_in(qq, group_id, platform, msg)
+            result = await self._plugin.sign_in_service.sign_in(qq, group_id, platform, msg, bot=getattr(event, "bot", None))
             if result["already_signed"]:
                 yield event.plain_result(result["msg"])
                 return

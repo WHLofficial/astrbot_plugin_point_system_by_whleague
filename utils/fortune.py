@@ -1,4 +1,5 @@
 import random
+import zlib
 
 _LEVELS = [
     ("\u4e0a\u4e0a\u7b7e", 5, "\u4f9d\u7b7e\u5230\uff0c\u4f9d\u62bd\u5956\uff0c\u4eca\u65e5\u9e3f\u8fd0\u5f53\u5934\uff01"),
@@ -27,7 +28,7 @@ _ADVICE = [
 
 
 def get_fortune(qq: str, date_str: str) -> dict:
-    seed_val = hash(f"{qq}_{date_str}") & 0x7FFFFFFF
+    seed_val = zlib.crc32(f"{qq}_{date_str}".encode("utf-8"))
     rng = random.Random(seed_val)
     level_name, _, _ = rng.choices(
         _LEVELS, weights=[w for _, w, _ in _LEVELS]

@@ -1,11 +1,13 @@
+from collections.abc import AsyncGenerator
 from astrbot.api import logger
+from astrbot.api.event import MessageEventResult
 
 
 class RankingHandler:
     def __init__(self, plugin):
         self._plugin = plugin
 
-    async def handle(self, event):
+    async def handle(self, event) -> AsyncGenerator[MessageEventResult, None]:
         try:
             group_id = event.get_group_id()
             if not group_id:
@@ -25,14 +27,12 @@ class RankingHandler:
                     lines.append(f"{i}. {u['qq']}  {u['points']} \u79ef\u5206 (\u7fa4{u['group_id']})")
                 else:
                     lines.append(f"{i}. {u['qq']}  {u['points']} \u79ef\u5206")
-                if i >= 10:
-                    break
             yield event.plain_result("\n".join(lines))
         except Exception as e:
             logger.error(f"Ranking error: {e}")
             yield event.plain_result("\u67e5\u8be2\u5931\u8d25\uff0c\u5df2\u8bb0\u5f55\u9519\u8bef")
 
-    async def stats(self, event):
+    async def stats(self, event) -> AsyncGenerator[MessageEventResult, None]:
         try:
             group_id = event.get_group_id()
             if not group_id:

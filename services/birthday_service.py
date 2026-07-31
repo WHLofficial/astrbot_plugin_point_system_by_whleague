@@ -1,6 +1,5 @@
-import json
 from astrbot.api import logger
-from utils.helpers import today_mmdd, today_str
+from ..utils.helpers import today_mmdd, today_str
 
 
 class BirthdayService:
@@ -12,6 +11,7 @@ class BirthdayService:
         return await self._dao.get_birthday_users(group_id, mmdd)
 
     async def announce_birthdays(self, group_id: str) -> dict:
+        """获取今日寿星列表（不标记已播报，标记由发送成功后由调用方完成）。"""
         today = today_str()
         already = await self._dao.was_birthday_announced(group_id, today)
         if already:
@@ -21,10 +21,4 @@ class BirthdayService:
         if not users:
             return {"announced": False, "reason": "no_birthdays"}
 
-        qq_list = [u["qq"] for u in users]
-        await self._dao.mark_birthday_announced(
-            group_id, today, json.dumps(qq_list)
-        )
-
-        logger.info(f"Birthday announcement for {group_id}: {qq_list}")
-        return {"announced": True, "users": qq_list}
+        return {"announced": True, "users": [u["qq"] for u in users]}

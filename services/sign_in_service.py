@@ -1,8 +1,12 @@
 import random
-from datetime import date
+from datetime import datetime
 from astrbot.api import logger
-from utils.helpers import today_str, today_mmdd
-from utils.fortune import format_fortune
+from ..utils.helpers import today_str, today_mmdd
+from ..utils.fortune import format_fortune
+
+
+class AlreadySigned(Exception):
+    """并发下重复签到标记，用于回滚事务。"""
 
 
 class SignInService:
@@ -14,7 +18,7 @@ class SignInService:
         self._date_reward = date_reward_svc
         self._cfg = config_cache
 
-    async def sign_in(self, qq: str, group_id: str, platform: str, message: str):
+    async def sign_in(self, qq: str, group_id: str, platform: str, message: str, bot=None):
         today = today_str()
         mmdd = today_mmdd()
 
@@ -27,7 +31,6 @@ class SignInService:
         total_days = user["total_sign_days"]
 
         if last_date:
-            from datetime import datetime
             try:
                 diff = (datetime.strptime(today, "%Y-%m-%d") - datetime.strptime(last_date, "%Y-%m-%d")).days
                 consecutive = consecutive + 1 if diff == 1 else 1
@@ -42,7 +45,9 @@ class SignInService:
         if cfg["signin_fixed_mode"]:
             base_points = cfg["signin_fixed_points"]
         else:
-            base_points = random.randint(cfg["signin_random_min"], cfg["signin_random_max"])
+            lo = min(cfg["signin_random_min"], cfg["signin_random_max"])
+            hi = max(cfg["signin_random_min"], cfg["signin_random_max"])
+            base_points = random.randint(lo, hi)
 
         total_points = base_points
         bonus_first = 0
@@ -54,11 +59,6 @@ class SignInService:
             bonus_first = cfg["signin_first_bonus"]
             total_points += bonus_first
 
-        signins_today = await self._dao.count_signins_today(group_id, today)
-        if signins_today == 0:
-            bonus_day_first = cfg["signin_day_first_bonus"]
-            total_points += bonus_day_first
-
         cap = cfg["signin_consecutive_max"]
         effective = min(consecutive, cap)
         bonus_consecutive = effective * cfg["signin_consecutive_bonus_per_day"]
@@ -68,9 +68,12 @@ class SignInService:
             bonus_weekly = cfg["signin_weekly_bonus"]
             total_points += bonus_weekly
 
-        easter_result = await self._easter.trigger(
+        easter = await self._easter.trigger(
             qq, group_id, user["lucky_pity"], user["unlucky_pity"]
         )
+        easter_result = easter["event"]
+        new_lucky_pity = easter["lucky_pity"]
+        new_unlucky_pity = easter["unlucky_pity"]
         easter_type = None
         easter_points = 0
         if easter_result:
@@ -82,35 +85,65 @@ class SignInService:
         total_points += date_reward_pts
 
         birthday_bonus = 0
-        if user["birthday"] == mmdd:
+        current_year = today[:4]
+        if user["birthday"] == mmdd and str(user["birthday_year"] or "") != current_year:
             birthday_bonus = cfg["birthday_bonus_points"]
             total_points += birthday_bonus
 
         async def _tx(conn):
+            # 事务内二次查重：并发签到只能有一个成功
+            cur = await conn.execute(
+                "SELECT 1 FROM sign_in_log WHERE qq=? AND group_id=? AND sign_date=?",
+                (qq, group_id, today),
+            )
+            if await cur.fetchone():
+                raise AlreadySigned()
+            # 每日首签判定移入事务：并发时只有真正第一个签到者获得奖励
+            cur = await conn.execute(
+                "SELECT COUNT(*) AS cnt FROM sign_in_log WHERE group_id=? AND sign_date=?",
+                (group_id, today),
+            )
+            row = await cur.fetchone()
+            first_bonus = cfg["signin_day_first_bonus"] if row and row[0] == 0 else 0
+            granted = total_points + first_bonus
             await conn.execute(
                 "INSERT INTO sign_in_log (qq, group_id, sign_date, points_earned, base_points, bonus_first_sign, bonus_day_first, bonus_consecutive, bonus_weekly, easter_event_type, easter_points) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                (qq, group_id, today, total_points, base_points, bonus_first, bonus_day_first, bonus_consecutive, bonus_weekly, easter_type, easter_points),
+                (qq, group_id, today, granted, base_points, bonus_first, first_bonus, bonus_consecutive, bonus_weekly, easter_type, easter_points),
             )
             await conn.execute(
-                "UPDATE users SET last_sign_date=?, consecutive_days=?, total_sign_days=?, max_consecutive_days=MAX(max_consecutive_days,?), updated_at=datetime('now','localtime') WHERE qq=? AND group_id=?",
-                (today, consecutive, total_days, consecutive, qq, group_id),
+                "UPDATE users SET last_sign_date=?, consecutive_days=?, total_sign_days=?, max_consecutive_days=MAX(max_consecutive_days,?), lucky_pity=?, unlucky_pity=?, updated_at=datetime('now','localtime') WHERE qq=? AND group_id=?",
+                (today, consecutive, total_days, consecutive, new_lucky_pity, new_unlucky_pity, qq, group_id),
             )
+            # 非酋负事件只扣余额、不计入累计获得
+            earned_inc = granted - min(easter_points, 0)
             await conn.execute(
                 "UPDATE users SET points=points+?, total_earned=total_earned+?, updated_at=datetime('now','localtime') WHERE qq=? AND group_id=?",
-                (total_points, total_points, qq, group_id),
+                (granted, earned_inc, qq, group_id),
             )
+            if birthday_bonus:
+                await conn.execute(
+                    "UPDATE users SET birthday_year=? WHERE qq=? AND group_id=?",
+                    (current_year, qq, group_id),
+                )
             cur = await conn.execute("SELECT points FROM users WHERE qq=? AND group_id=?", (qq, group_id))
             row = await cur.fetchone()
-            balance = row[0] if row else total_points
+            balance = row[0] if row else granted
             await conn.execute(
                 "INSERT INTO point_transactions (qq, group_id, amount, balance_after, reason) VALUES (?,?,?,?,?)",
-                (qq, group_id, total_points, balance, "签到"),
+                (qq, group_id, granted, balance, "签到"),
             )
+            return granted, first_bonus
 
-        await self._db.execute_transaction(_tx)
+        try:
+            granted, bonus_day_first = await self._db.execute_transaction(_tx)
+        except AlreadySigned:
+            return {"already_signed": True, "msg": "\u4eca\u5929\u5df2\u7ecf\u7b7e\u5230\u8fc7\u4e86\uff01"}
+
+        # 彩蛋非酋可能把余额打成负分，补发负分头衔；回正时自动移除
+        await self._point.ensure_negative_title(qq, group_id, bot=bot)
 
         parts = [
-            f"\u2705 \u7b7e\u5230\u6210\u529f\uff01\u83b7\u5f97 +{total_points} \u79ef\u5206",
+            f"\u2705 \u7b7e\u5230\u6210\u529f\uff01\u83b7\u5f97 +{granted} \u79ef\u5206",
             f"  \xb7 \u57fa\u7840\u5206: {base_points}",
         ]
         if bonus_first:
@@ -137,7 +170,7 @@ class SignInService:
 
         return {
             "already_signed": False,
-            "points": total_points,
+            "points": granted,
             "consecutive": consecutive,
             "msg": "\n".join(parts),
         }

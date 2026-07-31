@@ -1,36 +1,50 @@
 import os
-import shutil
 from datetime import datetime
+from pathlib import Path
 from astrbot.api import logger
 
 
 class BackupService:
-    def __init__(self, db, dao):
+    def __init__(self, db, config_cache: dict):
         self._db = db
-        self._dao = dao
+        self._config_cache = config_cache
 
     async def run_backup(self):
-        targets = await self._dao.get_active_backup_configs()
+        targets = self._config_cache.get("backup_dirs", [])
         if not targets:
-            logger.info("No backup targets configured, skipping.")
+            logger.info("No backup dirs configured, skipping.")
             return
 
-        src = self._db.conn.database
-        try:
-            await self._db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-        except Exception as e:
-            logger.warning(f"WAL checkpoint failed: {e}")
-
-        for t in targets:
+        for target in targets:
             try:
-                self._backup_to(src, t["target_path"])
-                await self._dao.update_backup_time(t["id"])
-                logger.info(f"Backup completed: {src} -> {t['target_path']}")
+                dst_dir = self._resolve(target)
+                await self._backup_to(dst_dir)
+                logger.info(f"Backup completed: {self._db.db_path} -> {dst_dir}")
             except Exception as e:
-                logger.error(f"Backup to {t['target_path']} failed: {e}")
+                logger.error(f"Backup to {target} failed: {e}")
 
-    def _backup_to(self, src: str, dst_dir: str):
-        os.makedirs(dst_dir, exist_ok=True)
+    def _resolve(self, target: str) -> Path:
+        """Resolve a backup directory.
+
+        Absolute paths are used as-is; relative paths are resolved against
+        the database directory so the plugin works on any deployment
+        (e.g. cloud servers where the working directory is not stable).
+
+        Args:
+            target: Backup directory as configured.
+
+        Returns:
+            Resolved backup directory path.
+        """
+        p = Path(os.path.expanduser(target.strip()))
+        if not p.is_absolute():
+            p = Path(self._db.db_path).parent / p
+        return p
+
+    async def _backup_to(self, dst_dir: Path):
+        """通过 VACUUM INTO 生成数据库一致快照（含 WAL 数据），避免复制不完整。"""
+        dst_dir.mkdir(parents=True, exist_ok=True)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        dst = os.path.join(dst_dir, f"points_system_{ts}.db")
-        shutil.copy2(src, dst)
+        dst = dst_dir / f"points_system_{ts}.db"
+        escaped = str(dst).replace("'", "''")
+        await self._db.execute(f"VACUUM INTO '{escaped}'")

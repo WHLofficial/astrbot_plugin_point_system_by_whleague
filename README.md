@@ -102,6 +102,11 @@ whl抽奖
 | `/兑换记录 all [页码]` | 查看全部兑换记录 |
 | `/兑换记录 pending [页码]` | 查看未核销记录 |
 | `/流水 @用户 [页码]` | 查看指定用户流水 |
+| `/添加管理 <QQ号>` | 添加本群积分系统管理员（仅群主/全局管理员） |
+| `/删除管理 <QQ号>` | 移除本群管理员（仅群主/全局管理员） |
+| `/添加日期奖励 <MM-DD\|MM-DD~MM-DD> <关键词> <积分> [概率]` | 新增日期奖励 |
+| `/删除日期奖励 <ID>` | 软删除日期奖励 |
+| `/查看日期奖励` | 查看日期奖励列表 |
 
 ## 配置项
 
@@ -129,6 +134,7 @@ whl抽奖
 | **抽奖** | | | |
 | lottery_enabled | bool | true | 开关 |
 | lottery_cost | int | 100 | 单次消耗积分 |
+| lottery_daily_limit | int | 10 | 每日抽奖次数上限 |
 | lottery_passphrase | str | whl | 抽奖口令 |
 | lottery_tiers | json | (五档) | 权重+倍率+标签+emoji |
 | **负分** | | | |
@@ -138,6 +144,7 @@ whl抽奖
 | birthday_announce_time | str | 08:00 | 每日播报时间 |
 | **备份** | | | |
 | backup_enabled | bool | true | 开关 |
+| backup_dirs | json | [] | 备份目标目录列表，支持相对路径（基于插件数据目录） |
 | **关键词** | | | |
 | keyword_sign | json | ["签到","sign","打卡"] | 签到触发关键词 |
 | keyword_lottery | json | ["抽奖","lottery"] | 抽奖触发关键词 |
@@ -160,9 +167,11 @@ whl抽奖
 
 ## 数据存储
 
-- **数据库文件**: `AstrBot/data/points_system.db`（SQLite，WAL 模式）
-- **自动备份**: 默认每天 03:00 备份到配置的目录，文件名含时间戳
-- **备份前**自动执行 `WAL checkpoint` 确保数据完整性
+- **数据库文件**: `<AstrBot数据目录>/plugin_data/astrbot_plugin_point_system_by_whleague/points_system.db`（SQLite，WAL 模式），自动创建
+- **路径定位**: 优先使用 AstrBot 官方路径 API 定位数据目录，不依赖进程工作目录，云服务器部署无需额外配置
+- **自动备份**: 默认每天 03:00 备份到配置项 `backup_dirs` 指定的目录，文件名含时间戳
+- **备份路径**: 绝对路径直接使用；相对路径基于插件数据目录解析，支持 `~` 展开
+- **备份方式**: `VACUUM INTO` 生成一致快照（含 WAL 数据）
 
 ## 依赖
 
@@ -177,6 +186,10 @@ git clone https://github.com/WHLofficial/astrbot_plugin_point_system_by_whleague
 cp -r astrbot_plugin_point_system_by_whleague AstrBot/data/plugins/
 # 重启 AstrBot 或热重载
 ```
+
+## 更新日志
+
+见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 许可证
 

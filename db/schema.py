@@ -1,6 +1,6 @@
 from astrbot.api import logger
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SQL_CREATE_TABLES = r"""
 
@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS users (
     lucky_pity INTEGER NOT NULL DEFAULT 0,
     unlucky_pity INTEGER NOT NULL DEFAULT 0,
     negative_title_id INTEGER,
+    negative_title_prev_card TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
     UNIQUE(qq, group_id)
@@ -69,6 +70,7 @@ CREATE TABLE IF NOT EXISTS point_transactions (
     balance_after INTEGER NOT NULL,
     reason TEXT NOT NULL,
     ref_id INTEGER,
+    admin_qq TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 
@@ -143,15 +145,6 @@ CREATE TABLE IF NOT EXISTS easter_events (
     created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 
-CREATE TABLE IF NOT EXISTS backup_configs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    target_path TEXT NOT NULL,
-    schedule_time TEXT NOT NULL DEFAULT '03:00',
-    is_active INTEGER NOT NULL DEFAULT 1,
-    last_backup_time TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
-);
-
 CREATE TABLE IF NOT EXISTS birthday_announce_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     group_id TEXT NOT NULL,
@@ -209,6 +202,34 @@ async def init_schema(db_manager):
         await db.commit()
         await _seed_default_easter_events(db)
         logger.info("Database schema initialized (version %d).", SCHEMA_VERSION)
+    else:
+        current = int(row["value"])
+        if current < SCHEMA_VERSION:
+            await _migrate(db, current)
+            await db.execute(
+                "UPDATE plugin_config SET value=?, updated_at=datetime('now','localtime') WHERE key='schema_version'",
+                (str(SCHEMA_VERSION),),
+            )
+            await db.commit()
+            logger.info("Database schema migrated %d -> %d.", current, SCHEMA_VERSION)
+
+
+async def _table_columns(db, table: str) -> set:
+    cur = await db.execute(f"PRAGMA table_info({table})")
+    rows = await cur.fetchall()
+    return {r["name"] for r in rows}
+
+
+async def _migrate(db, current_version: int):
+    """增量迁移：仅在目标列缺失时执行，保证可重复运行。"""
+    if current_version < 2:
+        cols = await _table_columns(db, "users")
+        if "negative_title_prev_card" not in cols:
+            await db.execute("ALTER TABLE users ADD COLUMN negative_title_prev_card TEXT")
+        cols = await _table_columns(db, "point_transactions")
+        if "admin_qq" not in cols:
+            await db.execute("ALTER TABLE point_transactions ADD COLUMN admin_qq TEXT")
+        await db.commit()
 
 
 async def _seed_default_easter_events(db):

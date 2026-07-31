@@ -33,7 +33,9 @@ DEFAULT_CONFIG = {
     "negative_disable_lottery": True,
     "birthday_bonus_points": 100,
     "birthday_announce_time": "08:00",
+    "signin_refresh_time": "04:00",
     "backup_enabled": True,
+    "backup_time": "04:00",
     "backup_dirs": json.dumps([]),
     "keyword_sign": json.dumps(["\u7b7e\u5230", "sign", "\u6253\u5361"]),
     "keyword_lottery": json.dumps(["\u62bd\u5956", "lottery"]),
@@ -63,7 +65,9 @@ TYPE_MAP = {
     "negative_disable_lottery": bool,
     "birthday_bonus_points": int,
     "birthday_announce_time": str,
+    "signin_refresh_time": str,
     "backup_enabled": bool,
+    "backup_time": str,
     "backup_dirs": str,
     "keyword_sign": str,
     "keyword_lottery": str,
@@ -113,9 +117,9 @@ def validate_and_cast(key: str, raw: str):
             raise ValueError(f"\u914d\u7f6e {key} \u4e0d\u80fd\u4e3a\u7a7a")
         return lst
 
-    if key == "birthday_announce_time":
+    if key in ("birthday_announce_time", "signin_refresh_time", "backup_time"):
         if not re.match(r"^([01]\d|2[0-3]):[0-5]\d$", raw.strip()):
-            raise ValueError("birthday_announce_time \u9700\u4e3a HH:MM \u683c\u5f0f")
+            raise ValueError(f"{key} \u9700\u4e3a HH:MM \u683c\u5f0f")
         return raw.strip()
 
     if key == "lottery_passphrase":

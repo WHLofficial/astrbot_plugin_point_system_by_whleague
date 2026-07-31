@@ -1,5 +1,7 @@
-from datetime import datetime, date
+from datetime import datetime
 from typing import Optional
+
+from ..utils.helpers import today_str
 
 
 class PointDAO:
@@ -9,7 +11,7 @@ class PointDAO:
     # ─── helpers ──────────────────────────────────────────
 
     def _today_str(self) -> str:
-        return date.today().isoformat()
+        return today_str()
 
     def _now_str(self) -> str:
         return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -316,3 +318,6 @@ class PointDAO:
 
     async def get_all_config(self):
         return await self._db.fetchall("SELECT * FROM plugin_config ORDER BY key")
+
+    async def clear_config(self):
+        await self._db.execute("DELETE FROM plugin_config")

@@ -1,0 +1,179 @@
+{
+  "signin_fixed_mode": {
+    "description": "签到固定积分模式",
+    "hint": "开启后每次签到获得固定积分，关闭则为随机区间积分。",
+    "type": "bool",
+    "default": false
+  },
+  "signin_fixed_points": {
+    "description": "签到固定积分",
+    "hint": "固定模式下每次签到获得的积分。",
+    "type": "int",
+    "default": 10
+  },
+  "signin_random_min": {
+    "description": "签到随机积分下限",
+    "hint": "随机模式下每次签到可获得的最小积分。",
+    "type": "int",
+    "default": 1
+  },
+  "signin_random_max": {
+    "description": "签到随机积分上限",
+    "hint": "随机模式下每次签到可获得的最大积分。",
+    "type": "int",
+    "default": 20
+  },
+  "signin_first_bonus": {
+    "description": "首次签到奖励",
+    "hint": "用户第一次签到时额外获得的积分。",
+    "type": "int",
+    "default": 50
+  },
+  "signin_day_first_bonus": {
+    "description": "每日首个签到奖励",
+    "hint": "每天第一个签到的人获得的额外积分。",
+    "type": "int",
+    "default": 30
+  },
+  "signin_consecutive_max": {
+    "description": "连续签到最大天数",
+    "hint": "超过该天数后连续签到加成不再增加。",
+    "type": "int",
+    "default": 30
+  },
+  "signin_consecutive_bonus_per_day": {
+    "description": "每日连签加成",
+    "hint": "连续签到每天额外增加的积分。",
+    "type": "int",
+    "default": 5
+  },
+  "signin_weekly_bonus": {
+    "description": "每周连签奖励",
+    "hint": "连续签到满 7 天获得的额外积分。",
+    "type": "int",
+    "default": 100
+  },
+  "active_reward_enabled": {
+    "description": "启用活跃奖励",
+    "hint": "群内发消息是否可能触发活跃奖励。",
+    "type": "bool",
+    "default": true
+  },
+  "active_reward_probability": {
+    "description": "活跃奖励概率",
+    "hint": "每条符合条件消息触发活跃奖励的概率，0~1 之间的小数。",
+    "type": "float",
+    "default": 0.05
+  },
+  "active_reward_points": {
+    "description": "活跃奖励积分",
+    "hint": "触发活跃奖励时获得的积分。",
+    "type": "int",
+    "default": 1
+  },
+  "active_reward_cooldown": {
+    "description": "活跃奖励冷却(秒)",
+    "hint": "同一用户触发活跃奖励的最小间隔秒数。",
+    "type": "int",
+    "default": 60
+  },
+  "active_reward_min_length": {
+    "description": "活跃奖励最短消息长度",
+    "hint": "消息达到该长度才有机会触发活跃奖励。",
+    "type": "int",
+    "default": 3
+  },
+  "active_reward_global_cooldown": {
+    "description": "活跃奖励全局冷却(秒)",
+    "hint": "全群触发活跃奖励的最小间隔秒数。",
+    "type": "int",
+    "default": 10
+  },
+  "lottery_enabled": {
+    "description": "启用抽奖",
+    "hint": "是否开放抽奖功能。",
+    "type": "bool",
+    "default": true
+  },
+  "lottery_cost": {
+    "description": "抽奖消耗积分",
+    "hint": "每次抽奖消耗的积分。",
+    "type": "int",
+    "default": 100
+  },
+  "lottery_daily_limit": {
+    "description": "每日抽奖次数上限",
+    "hint": "每人每天最多抽奖次数，0 表示不限。",
+    "type": "int",
+    "default": 10
+  },
+  "lottery_passphrase": {
+    "description": "抽奖口令",
+    "hint": "抽奖功能口令。",
+    "type": "string",
+    "default": "whl"
+  },
+  "lottery_tiers": {
+    "description": "抽奖档位",
+    "hint": "JSON 格式，如 {\"tiers\": [{\"label\": \"特等奖\", \"weight\": 1, \"multiplier\": 10, \"emoji\": \"👑\"}]}，weight 为权重、multiplier 为奖励倍数。",
+    "type": "text",
+    "default": "{\"tiers\": [{\"label\": \"特等奖\", \"weight\": 1, \"multiplier\": 10.0, \"emoji\": \"\\ud83d\\udc51\"}, {\"label\": \"一等奖\", \"weight\": 5, \"multiplier\": 5.0, \"emoji\": \"\\ud83e\\udd47\"}, {\"label\": \"二等奖\", \"weight\": 15, \"multiplier\": 2.0, \"emoji\": \"\\ud83e\\udd48\"}, {\"label\": \"三等奖\", \"weight\": 30, \"multiplier\": 1.2, \"emoji\": \"\\ud83e\\udd49\"}, {\"label\": \"参与奖\", \"weight\": 49, \"multiplier\": 0.0, \"emoji\": \"\\u2728\"}]}"
+  },
+  "negative_disable_lottery": {
+    "description": "负积分禁止抽奖",
+    "hint": "积分余额为负时禁止抽奖。",
+    "type": "bool",
+    "default": true
+  },
+  "signin_refresh_time": {
+    "description": "每日刷新时间",
+    "hint": "签到/抽奖次数/今日口令等每日逻辑的刷新时刻，HH:MM 24 小时制，一天区间为该时刻至次日同一时刻。",
+    "type": "string",
+    "default": "04:00"
+  },
+  "birthday_bonus_points": {
+    "description": "生日奖励积分",
+    "hint": "生日当天自动发放的积分。",
+    "type": "int",
+    "default": 100
+  },
+  "birthday_announce_time": {
+    "description": "生日播报时间",
+    "hint": "每天播报生日祝福的时间，HH:MM 24 小时制。",
+    "type": "string",
+    "default": "08:00"
+  },
+  "backup_enabled": {
+    "description": "启用每日备份",
+    "hint": "每天自动备份积分数据库。",
+    "type": "bool",
+    "default": true
+  },
+  "backup_time": {
+    "description": "每日备份时间",
+    "hint": "每天自动备份的时刻，HH:MM 24 小时制。",
+    "type": "string",
+    "default": "04:00"
+  },
+  "backup_dirs": {
+    "description": "额外备份目录",
+    "hint": "除数据库外需要额外备份的目录列表。",
+    "type": "list",
+    "items": {"type": "string"},
+    "default": []
+  },
+  "keyword_sign": {
+    "description": "签到关键词",
+    "hint": "触发签到的关键词列表。",
+    "type": "list",
+    "items": {"type": "string"},
+    "default": ["签到", "sign", "打卡"]
+  },
+  "keyword_lottery": {
+    "description": "抽奖关键词",
+    "hint": "触发抽奖的关键词列表。",
+    "type": "list",
+    "items": {"type": "string"},
+    "default": ["抽奖", "lottery"]
+  }
+}

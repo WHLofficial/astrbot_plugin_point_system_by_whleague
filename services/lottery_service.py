@@ -1,7 +1,7 @@
 import random
 import json
-from datetime import date
 from astrbot.api import logger
+from ..utils.helpers import period_start_str
 
 
 class LotteryError(Exception):
@@ -52,14 +52,13 @@ class LotteryService:
         reward = int(cost * chosen["multiplier"])
         is_win = reward > 0
 
-        today = date.today().isoformat()
         daily_limit = self._cfg["lottery_daily_limit"]
 
         async def _tx(conn):
             if daily_limit > 0:
                 cur = await conn.execute(
-                    "SELECT COUNT(*) AS cnt FROM lottery_record WHERE qq=? AND group_id=? AND date(created_at)=?",
-                    (qq, group_id, today),
+                    "SELECT COUNT(*) AS cnt FROM lottery_record WHERE qq=? AND group_id=? AND created_at>=?",
+                    (qq, group_id, period_start_str()),
                 )
                 row = await cur.fetchone()
                 if row and row[0] >= daily_limit:

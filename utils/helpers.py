@@ -1,13 +1,48 @@
-from datetime import datetime, date
+from datetime import datetime, timedelta
 from typing import Optional
+
+_DEFAULT_BOUNDARY = (4, 0)
+_day_boundary = _DEFAULT_BOUNDARY
+"""业务日分界时刻 (hour, minute)：一天区间为该时刻至次日同一时刻。"""
+
+
+def set_day_boundary(value: str) -> tuple[int, int]:
+    """设置每日刷新时刻，非法输入回退到默认 04:00。"""
+    global _day_boundary
+    try:
+        hour, minute = value.strip().split(":", 1)
+        parsed = (int(hour), int(minute))
+        if not (0 <= parsed[0] <= 23 and 0 <= parsed[1] <= 59):
+            raise ValueError
+        _day_boundary = parsed
+    except (AttributeError, ValueError):
+        _day_boundary = _DEFAULT_BOUNDARY
+    return _day_boundary
+
+
+def get_day_boundary() -> tuple[int, int]:
+    return _day_boundary
+
+
+def _shifted_now() -> datetime:
+    h, m = _day_boundary
+    return datetime.now() - timedelta(hours=h, minutes=m)
 
 
 def today_str() -> str:
-    return date.today().isoformat()
+    return _shifted_now().date().isoformat()
 
 
 def today_mmdd() -> str:
-    return date.today().strftime("%m-%d")
+    return _shifted_now().date().strftime("%m-%d")
+
+
+def period_start_str() -> str:
+    """当前业务日区间的起点时间（YYYY-MM-DD HH:MM:SS，本地时区）。"""
+    now = datetime.now()
+    h, m = _day_boundary
+    day = (now - timedelta(hours=h, minutes=m)).date()
+    return day.strftime("%Y-%m-%d") + f" {h:02d}:{m:02d}:00"
 
 
 def is_date_in_range(target_mmdd: str, start: str, end: Optional[str] = None) -> bool:

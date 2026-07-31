@@ -234,7 +234,11 @@ class AdminHandler:
             else:
                 stored = str(parsed)
             self._plugin.config_cache = new_cache
-            await self._plugin.dao.set_config(key, stored)
+            if self._plugin.config is not None:
+                self._plugin.config[key] = parsed
+                self._plugin.config.save_config()
+            else:
+                await self._plugin.dao.set_config(key, stored)
             yield event.plain_result(f"已更新配置 {key} = {parsed}")
         except ValueError as e:
             yield event.plain_result(f"参数错误: {e}")
@@ -248,15 +252,17 @@ class AdminHandler:
                 yield r
             return
         try:
-            rows = await self._plugin.dao.get_all_config()
-            if not rows:
-                yield event.plain_result("没有配置数据")
-                return
+            from ..config.defaults import DEFAULT_CONFIG
             lines = ["⚙ 当前配置"]
-            for r in rows:
-                if r["key"] in ("schema_version",):
-                    continue
-                lines.append(f"{r['key']} = {r['value']}")
+            for key, default in DEFAULT_CONFIG.items():
+                val = self._plugin.config_cache.get(key, default)
+                if isinstance(val, list):
+                    display = json.dumps(val, ensure_ascii=False)
+                elif isinstance(val, bool):
+                    display = str(val).lower()
+                else:
+                    display = str(val)
+                lines.append(f"{key} = {display}")
             yield event.plain_result("\n".join(lines))
         except Exception as e:
             logger.error(f"View config error: {e}")

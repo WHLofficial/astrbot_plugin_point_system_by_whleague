@@ -6,7 +6,8 @@ from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
 from astrbot.api.platform import MessageType
 
-from .config.defaults import DEFAULT_CONFIG, parse_keyword_list
+from .config.defaults import DEFAULT_CONFIG, parse_keyword_list, _LIST_KEYS
+from .utils.helpers import set_day_boundary, today_str
 from .db.connection import DatabaseManager
 from .db.schema import init_schema
 from .db.dao import PointDAO
@@ -24,10 +25,12 @@ _PLUGIN_COMMANDS = frozenset({
 
 
 @register("points_system", "WHLofficial",
-          "\u79ef\u5206\u7cfb\u7edf\u63d2\u4ef6\uff1a\u7b7e\u5230/\u62bd\u5956/\u5151\u6362/\u6392\u884c/\u751f\u65e5\u7b49", "0.0.3")
+          "\u79ef\u5206\u7cfb\u7edf\u63d2\u4ef6\uff1a\u7b7e\u5230/\u62bd\u5956/\u5151\u6362/\u6392\u884c/\u751f\u65e5\u7b49", "0.0.4")
 class PointSystemPlugin(Star):
-    def __init__(self, context: Context):
+    def __init__(self, context: Context, config: dict | None = None):
         super().__init__(context)
+        self.config = config
+        """AstrBot 托管的插件配置（WebUI 中可见、可修改），见 _conf_schema.json。"""
 
     async def initialize(self) -> None:
         self.db = DatabaseManager()
@@ -38,6 +41,7 @@ class PointSystemPlugin(Star):
         await init_schema(self.db)
 
         self.config_cache = await self._load_config_cache()
+        set_day_boundary(self.config_cache.get("signin_refresh_time", "04:00"))
         self.rate_limiter = RateLimiter()
 
         from .services.point_service import PointService
@@ -88,48 +92,87 @@ class PointSystemPlugin(Star):
         logger.info("Point system plugin initialized.")
 
     async def _load_config_cache(self) -> dict:
-        cache = dict(DEFAULT_CONFIG)
-        for key in ("keyword_sign", "keyword_lottery", "backup_dirs"):
-            cache[key] = parse_keyword_list(cache[key])
+        """从 AstrBot 托管的配置（data/config/*_config.json）构建配置缓存。
 
-        rows = await self.dao.get_all_config()
-        for r in rows:
-            key = r["key"]
-            if key in ("schema_version",):
-                continue
-            val = r["value"]
-            default = DEFAULT_CONFIG.get(key)
-            if default is None:
-                continue
-            try:
-                if key in ("keyword_sign", "keyword_lottery", "backup_dirs"):
-                    cache[key] = parse_keyword_list(val)
-                elif isinstance(default, bool):
-                    cache[key] = val.lower() in ("true", "1", "yes")
-                elif isinstance(default, int):
-                    cache[key] = int(val)
-                elif isinstance(default, float):
-                    cache[key] = float(val)
-                else:
-                    cache[key] = val
-            except (ValueError, TypeError):
-                logger.warning(f"Invalid config value for {key}: {val!r}, using default.")
+        兼容旧版本：首次部署（配置文件刚生成）时，将旧版数据库 plugin_config
+        表中的配置迁移到托管配置文件中，并清空旧表。
+        """
+        if self.config is None:
+            cache = dict(DEFAULT_CONFIG)
+            for key in _LIST_KEYS:
+                cache[key] = parse_keyword_list(cache[key])
+            return cache
+
+        cache = {}
+        for key, default in DEFAULT_CONFIG.items():
+            val = self.config.get(key, default)
+            if key in _LIST_KEYS:
+                cache[key] = parse_keyword_list(val)
+            else:
+                cache[key] = val
+
+        if getattr(self.config, "first_deploy", False):
+            rows = await self.dao.get_all_config()
+            legacy = {r["key"]: r["value"] for r in rows if r["key"] not in ("schema_version",)}
+            changed = False
+            for key, raw in legacy.items():
+                if key not in DEFAULT_CONFIG:
+                    continue
+                try:
+                    parsed = self._cast_config_value(key, raw)
+                except (ValueError, TypeError):
+                    logger.warning(f"Invalid legacy config value for {key}: {raw!r}, skipped.")
+                    continue
+                self.config[key] = parsed
+                cache[key] = parsed
+                changed = True
+            if changed:
+                self.config.save_config()
+                logger.info("Migrated legacy DB config into plugin config file.")
+            await self.dao.clear_config()
         return cache
+
+    @staticmethod
+    def _parse_hhmm(value: str, default_hour: int, default_minute: int) -> tuple[int, int]:
+        """解析 HH:MM 配置，非法值回退默认。"""
+        try:
+            hour, minute = value.strip().split(":", 1)
+            hour, minute = int(hour), int(minute)
+            if 0 <= hour <= 23 and 0 <= minute <= 59:
+                return hour, minute
+        except (AttributeError, ValueError, TypeError):
+            pass
+        return default_hour, default_minute
+
+    @staticmethod
+    def _cast_config_value(key: str, raw: str):
+        if key in _LIST_KEYS:
+            return parse_keyword_list(raw)
+        default = DEFAULT_CONFIG[key]
+        if isinstance(default, bool):
+            return raw.lower() in ("true", "1", "yes")
+        if isinstance(default, int):
+            return int(raw)
+        if isinstance(default, float):
+            return float(raw)
+        return raw
 
     async def _start_cron_jobs(self) -> None:
         try:
             cfg = self.config_cache
 
             if cfg.get("backup_enabled", True):
+                backup_time = cfg.get("backup_time", "04:00")
+                backup_hour, backup_minute = self._parse_hhmm(backup_time, 4, 0)
                 job = await self.context.cron_manager.add_basic_job(
                     name="points_backup",
-                    cron_expression="0 3 * * *",
+                    cron_expression=f"{backup_minute} {backup_hour} * * *",
                     handler=self._cron_backup,
                     description="Daily point system backup",
                     timezone="Asia/Shanghai",
                 )
                 self._backup_job = job
-                logger.info("Backup cron job scheduled at 03:00 daily.")
+                logger.info(f"Backup cron job scheduled at {backup_time} daily.")
 
             announce_time = cfg.get("birthday_announce_time", "08:00")
             hour, minute = announce_time.split(":")
@@ -154,9 +197,8 @@ class PointSystemPlugin(Star):
 
     async def _cron_birthday_announce(self) -> None:
         logger.info("Running birthday announcement...")
-        from datetime import date
         group_ids = await self.dao.get_all_group_ids()
-        today = date.today().isoformat()
+        today = today_str()
         for gid in group_ids:
             try:
                 result = await self.birthday_service.announce_birthdays(gid)

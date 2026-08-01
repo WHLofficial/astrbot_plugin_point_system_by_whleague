@@ -2,9 +2,10 @@
 import random
 import time
 from collections.abc import AsyncGenerator
-from typing import Optional
+
 from astrbot.api import logger
 from astrbot.api.event import MessageEventResult
+
 from ..utils.security import parse_int, parse_qq, parse_qq_arg, sanitize_text
 
 _CLEAR_TOKEN_TTL = 300.0
@@ -41,6 +42,23 @@ class AdminHandler:
         self._plugin = plugin
         self._pending_clears: dict[str, dict] = {}
         """qq -> {"token", "scope", "group_id", "expires_at"}"""
+
+    def _prune_pending_clears(self, keep: str | None = None) -> None:
+        """清理已过期的清空令牌，防止长期未确认的条目驻留内存。
+
+        Args:
+            keep: 保留的 QQ（当前操作者），其过期判定留给 confirm_clear 给出明确提示。
+        """
+        if not self._pending_clears:
+            return
+        now = time.time()
+        expired = [
+            qq
+            for qq, p in self._pending_clears.items()
+            if qq != keep and p["expires_at"] <= now
+        ]
+        for qq in expired:
+            del self._pending_clears[qq]
 
     async def _is_admin(self, event) -> bool:
         if event.is_admin():
@@ -133,7 +151,7 @@ class AdminHandler:
             stock = -1
             if len(parts) >= 4:
                 stock = parse_int(parts[3], min_val=-1)
-            item_id = await self._plugin.dao.add_item(name, cost, stock)
+            await self._plugin.dao.add_item(name, cost, stock)
             yield event.plain_result(f"已添加兑换物品: {name} (消耗{cost}积分, 库存{stock})")
         except (ValueError, IndexError) as e:
             yield event.plain_result(f"参数错误: {e}")
@@ -222,7 +240,7 @@ class AdminHandler:
             admin_qq = event.get_sender_id()
             await self._plugin.dao.set_daily_keyword(group_id, keyword, points, admin_qq)
             self._plugin.daily_keyword_service.invalidate(group_id)
-            yield event.plain_result(f"已设置今日口令: \"{keyword}\" 奖励 {points} 积分")
+            yield event.plain_result(f'已设置今日口令: "{keyword}" 奖励 {points} 积分')
         except (ValueError, IndexError) as e:
             yield event.plain_result(f"参数错误: {e}")
         except Exception as e:
@@ -284,6 +302,11 @@ class AdminHandler:
                 self._plugin.config.save_config()
             else:
                 await self._plugin.dao.set_config(key, stored)
+            if key == "signin_refresh_time":
+                from ..utils.helpers import set_day_boundary
+                set_day_boundary(parsed)
+            if key in ("backup_time", "birthday_announce_time", "backup_enabled"):
+                await self._plugin.reschedule_cron_jobs()
             yield event.plain_result(f"已更新配置 {key} = {parsed}")
         except ValueError as e:
             yield event.plain_result(f"参数错误: {e}")
@@ -439,7 +462,7 @@ class AdminHandler:
             )
             range_text = start_date + (f"~{end_date}" if end_date else "")
             yield event.plain_result(
-                f"已添加日期奖励 #{reward_id}: {range_text} 关键词\"{keyword}\" +{points}积分 概率{probability}"
+                f'已添加日期奖励 #{reward_id}: {range_text} 关键词"{keyword}" +{points}积分 概率{probability}'
             )
         except (ValueError, IndexError) as e:
             yield event.plain_result(f"参数错误: {e}")
@@ -510,6 +533,7 @@ class AdminHandler:
             scope_desc = "全部数据（含商店物品、日期奖励、管理名单等所有数据）"
 
         token = str(random.randint(100000, 999999))
+        self._prune_pending_clears()
         self._pending_clears[event.get_sender_id()] = {
             "token": token,
             "scope": scope,
@@ -531,6 +555,7 @@ class AdminHandler:
                 return
 
             qq = event.get_sender_id()
+            self._prune_pending_clears(keep=qq)
             pending = self._pending_clears.pop(qq, None)
             if not pending:
                 yield event.plain_result("没有待确认的清空操作，请先发起 /清空数据 或 /清空全部数据")
@@ -583,7 +608,7 @@ class AdminHandler:
             logger.error(f"Confirm clear error: {e}")
             yield event.plain_result("操作失败，已记录错误")
 
-    async def _do_clear(self, scope: str, group_id: Optional[str]) -> dict:
+    async def _do_clear(self, scope: str, group_id: str | None) -> dict:
         tables = _GROUP_CLEAR_TABLES if scope == "group" else _GLOBAL_CLEAR_TABLES
         counts: dict[str, int] = {}
 
@@ -601,11 +626,16 @@ class AdminHandler:
         await self._plugin.db.execute_transaction(_tx)
 
         if scope == "global":
+            # 重播种彩蛋事件也走持锁事务，避免与其他写操作并发竞争
             from ..db.schema import _seed_default_easter_events
-            await _seed_default_easter_events(self._plugin.db.conn)
+
+            async def _reseed(conn):
+                await _seed_default_easter_events(conn)
+
+            await self._plugin.db.execute_transaction(_reseed)
         return counts
 
-    async def _restore_negative_cards(self, bot, scope: str, group_id: Optional[str]) -> int:
+    async def _restore_negative_cards(self, bot, scope: str, group_id: str | None) -> int:
         if scope == "group":
             rows = await self._plugin.db.fetchall(
                 "SELECT qq, group_id, negative_title_prev_card FROM users "

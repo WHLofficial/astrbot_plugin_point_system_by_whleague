@@ -1,5 +1,4 @@
 from datetime import datetime
-from typing import Optional
 
 from ..utils.helpers import today_str
 
@@ -49,8 +48,8 @@ class PointDAO:
         return row["points"] if row else 0
 
     async def set_negative_title(
-        self, qq: str, group_id: str, title_id: Optional[int],
-        prev_card: Optional[str] = None,
+        self, qq: str, group_id: str, title_id: int | None,
+        prev_card: str | None = None,
     ):
         if title_id is None:
             await self._db.execute(
@@ -117,7 +116,7 @@ class PointDAO:
     # ─── point_transactions ────────────────────────────────
 
     async def get_transactions(
-        self, qq: Optional[str] = None, group_id: Optional[str] = None,
+        self, qq: str | None = None, group_id: str | None = None,
         limit: int = 10, offset: int = 0,
     ):
         conditions = []
@@ -178,7 +177,7 @@ class PointDAO:
         )
 
     async def get_redeem_records_by_user(
-        self, qq: str, group_id: Optional[str] = None, limit: int = 10, offset: int = 0,
+        self, qq: str, group_id: str | None = None, limit: int = 10, offset: int = 0,
     ):
         if group_id:
             return await self._db.fetchall(
@@ -191,7 +190,7 @@ class PointDAO:
         )
 
     async def get_redeem_records_all(
-        self, status: Optional[str] = None, group_id: Optional[str] = None,
+        self, status: str | None = None, group_id: str | None = None,
         limit: int = 10, offset: int = 0,
     ):
         conditions = []
@@ -226,20 +225,20 @@ class PointDAO:
 
     # ─── admins ───────────────────────────────────────────
 
-    async def is_admin(self, qq: str, group_id: Optional[str] = None) -> bool:
+    async def is_admin(self, qq: str, group_id: str | None = None) -> bool:
         row = await self._db.fetchone(
             "SELECT 1 FROM admins WHERE qq=? AND (group_id IS NULL OR group_id=?) LIMIT 1",
             (qq, group_id or ""),
         )
         return row is not None
 
-    async def add_admin(self, qq: str, added_by: str, group_id: Optional[str] = None):
+    async def add_admin(self, qq: str, added_by: str, group_id: str | None = None):
         await self._db.execute(
             "INSERT OR IGNORE INTO admins (qq, group_id, added_by) VALUES (?, ?, ?)",
             (qq, group_id, added_by),
         )
 
-    async def remove_admin(self, qq: str, group_id: Optional[str] = None):
+    async def remove_admin(self, qq: str, group_id: str | None = None):
         if group_id:
             await self._db.execute(
                 "DELETE FROM admins WHERE qq=? AND group_id=?", (qq, group_id)
@@ -320,15 +319,20 @@ class PointDAO:
 
     async def clear_daily_keyword(self, group_id: str):
         today = self._today_str()
-        # 先删领取记录再删口令，避免外键约束失败
-        await self._db.execute(
-            "DELETE FROM daily_keyword_claim WHERE kw_id IN "
-            "(SELECT id FROM daily_keyword WHERE group_id=? AND set_date=?)",
-            (group_id, today),
-        )
-        await self._db.execute(
-            "DELETE FROM daily_keyword WHERE group_id=? AND set_date=?", (group_id, today)
-        )
+
+        async def _tx(conn):
+            # 先删领取记录再删口令，避免外键约束失败；两条 DELETE 同事务，中途失败整体回滚
+            await conn.execute(
+                "DELETE FROM daily_keyword_claim WHERE kw_id IN "
+                "(SELECT id FROM daily_keyword WHERE group_id=? AND set_date=?)",
+                (group_id, today),
+            )
+            await conn.execute(
+                "DELETE FROM daily_keyword WHERE group_id=? AND set_date=?",
+                (group_id, today),
+            )
+
+        await self._db.execute_transaction(_tx)
 
     async def has_claimed_daily_keyword(self, kw_id: int, qq: str) -> bool:
         row = await self._db.fetchone(

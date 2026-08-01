@@ -69,6 +69,11 @@ class PointService:
         result = {"qq": qq, "group_id": group_id, "amount": -amount, "reason": reason}
 
         async def _tx(conn):
+            # 从未签到过的用户无 users 行，先补建行，避免扣分静默丢失
+            await conn.execute(
+                "INSERT OR IGNORE INTO users (qq, group_id) VALUES (?, ?)",
+                (qq, group_id),
+            )
             async with conn.execute(
                 "SELECT points FROM users WHERE qq=? AND group_id=?", (qq, group_id)
             ) as cur:

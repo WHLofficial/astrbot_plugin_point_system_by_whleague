@@ -171,6 +171,23 @@ class PointSystemPlugin(Star):
             return float(raw)
         return raw
 
+    async def _remove_cron_jobs(self) -> None:
+        """移除已注册的定时任务（配置热更新与终止时复用）。"""
+        for attr in ("_backup_job", "_birthday_job"):
+            job = getattr(self, attr, None)
+            if job:
+                try:
+                    job.remove()
+                except Exception:
+                    pass
+        self._backup_job = None
+        self._birthday_job = None
+
+    async def reschedule_cron_jobs(self) -> None:
+        """热更新定时任务：移除旧任务后按最新配置重建。"""
+        await self._remove_cron_jobs()
+        await self._start_cron_jobs()
+
     async def _start_cron_jobs(self) -> None:
         try:
             cfg = self.config_cache
@@ -188,7 +205,7 @@ class PointSystemPlugin(Star):
                 logger.info(f"Backup cron job scheduled at {backup_time} (host local time).")
 
             announce_time = cfg.get("birthday_announce_time", "08:00")
-            hour, minute = announce_time.split(":")
+            hour, minute = self._parse_hhmm(announce_time, 8, 0)
             cron_expr = f"{minute} {hour} * * *"
             job2 = await self.context.cron_manager.add_basic_job(
                 name="birthday_announce",
@@ -259,6 +276,7 @@ class PointSystemPlugin(Star):
     async def on_lottery(self, event: AstrMessageEvent) -> AsyncGenerator[MessageEventResult, None]:
         async for result in self.lottery_handler.handle(event):
             yield result
+        event.stop_event()
 
     # ═══════════════════════════════════════════════════════════
     # Handlers: Ranking
@@ -268,6 +286,7 @@ class PointSystemPlugin(Star):
     async def on_ranking(self, event: AstrMessageEvent) -> AsyncGenerator[MessageEventResult, None]:
         async for result in self.ranking_handler.handle(event):
             yield result
+        event.stop_event()
 
     # ═══════════════════════════════════════════════════════════
     # Handlers: Redeem (command)
@@ -294,6 +313,10 @@ class PointSystemPlugin(Star):
         parts = msg.split(maxsplit=2)
         target = parts[1] if len(parts) >= 2 else None
         page = parts[2] if len(parts) >= 3 else "1"
+        # 纯数字参数视为页码（与 /流水 语义一致），如 /兑换记录 2
+        if target and target.isdigit():
+            page = target
+            target = None
         async for r in self.redeem_handler.list_records(event, target, page):
             yield r
 
@@ -500,16 +523,7 @@ class PointSystemPlugin(Star):
                 self._cache_sweep_task.cancel()
             except Exception:
                 pass
-        if hasattr(self, "_backup_job") and self._backup_job:
-            try:
-                self._backup_job.remove()
-            except Exception:
-                pass
-        if hasattr(self, "_birthday_job") and self._birthday_job:
-            try:
-                self._birthday_job.remove()
-            except Exception:
-                pass
+        await self._remove_cron_jobs()
         if hasattr(self, "db"):
             await self.db.close()
         logger.info("Point system plugin terminated.")

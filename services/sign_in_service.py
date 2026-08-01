@@ -1,9 +1,8 @@
 import random
 from datetime import datetime
-from typing import Optional
-from astrbot.api import logger
-from ..utils.helpers import today_str, today_mmdd
+
 from ..utils.fortune import format_fortune
+from ..utils.helpers import today_mmdd, today_str
 
 
 class AlreadySigned(Exception):
@@ -19,7 +18,7 @@ class SignInService:
         self._date_reward = date_reward_svc
         self._cfg = config_cache
 
-    async def sign_in(self, qq: str, group_id: str, platform: str, message: str, bot=None, user_name: Optional[str] = None):
+    async def sign_in(self, qq: str, group_id: str, platform: str, message: str, bot=None, user_name: str | None = None):
         today = today_str()
         mmdd = today_mmdd()
 
@@ -144,7 +143,7 @@ class SignInService:
         await self._point.ensure_negative_title(qq, group_id, bot=bot)
 
         parts = [
-            f"\u2705 \u7b7e\u5230\u6210\u529f\uff01\u83b7\u5f97 +{granted} \u79ef\u5206",
+            f"\u2705 \u7b7e\u5230\u6210\u529f\uff01\u83b7\u5f97 {granted:+d} \u79ef\u5206",
             f"  \xb7 \u57fa\u7840\u5206: {base_points}",
         ]
         if bonus_first:

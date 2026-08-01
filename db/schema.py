@@ -202,6 +202,7 @@ async def init_schema(db_manager):
         )
         await db.commit()
         await _seed_default_easter_events(db)
+        await db.commit()
         logger.info("Database schema initialized (version %d).", SCHEMA_VERSION)
     else:
         try:
@@ -230,8 +231,11 @@ async def init_schema(db_manager):
 
 async def _table_columns(db, table: str) -> set:
     cur = await db.execute(f"PRAGMA table_info({table})")
-    rows = await cur.fetchall()
-    return {r["name"] for r in rows}
+    try:
+        rows = await cur.fetchall()
+        return {r["name"] for r in rows}
+    finally:
+        await cur.close()
 
 
 async def _migrate(db, current_version: int):
@@ -251,9 +255,9 @@ async def _seed_default_easter_events(db):
         ("lucky", "\u6b27\u7687\u964d\u4e34", "\u7b7e\u5230\u89e6\u53d1\u6b27\u7687\u4e8b\u4ef6\uff0c\u83b7\u5f97\u5927\u91cf\u79ef\u5206\uff01", 0.02, 50, 200, 10),
         ("unlucky", "\u975e\u8457\u9644\u4f53", "\u7b7e\u5230\u89e6\u53d1\u975e\u8457\u4e8b\u4ef6\uff0c\u4e22\u5931\u5927\u91cf\u79ef\u5206\u2026", 0.03, -200, -50, 15),
     ]
+    # 不在函数内提交：由调用方在同一事务内完成，或在其后显式 commit
     for ev in events:
         await db.execute(
             "INSERT OR IGNORE INTO easter_events (event_type, name, description, probability, points_min, points_max, pity_count) VALUES (?, ?, ?, ?, ?, ?, ?)",
             ev,
         )
-    await db.commit()

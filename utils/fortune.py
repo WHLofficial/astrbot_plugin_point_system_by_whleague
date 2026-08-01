@@ -1,4 +1,5 @@
 import random
+import re
 import zlib
 
 _LEVELS = [
@@ -28,7 +29,7 @@ _ADVICE = [
 
 
 def get_fortune(qq: str, date_str: str) -> dict:
-    seed_val = zlib.crc32(f"{qq}_{date_str}".encode("utf-8"))
+    seed_val = zlib.crc32(f"{qq}_{date_str}".encode())
     rng = random.Random(seed_val)
     level_name, _, _ = rng.choices(
         _LEVELS, weights=[w for _, w, _ in _LEVELS]
@@ -44,9 +45,11 @@ def get_fortune(qq: str, date_str: str) -> dict:
 
 def format_fortune(qq: str, date_str: str, user_name: str) -> str:
     f = get_fortune(qq, date_str)
+    # 昵称可能含换行/控制字符，剥离后再拼入文案，防止构造多行伪造消息
+    clean_name = re.sub(r"[\x00-\x1f\x7f]", "", str(user_name or "")).strip()
     return (
         "\u2501" * 20 + "\n"
-        f"\U0001f4ae {user_name} \u7684\u4eca\u65e5\u8fd0\u52bf\n"
+        f"\U0001f4ae {clean_name} \u7684\u4eca\u65e5\u8fd0\u52bf\n"
         f"\U0001f340 {f['level']}\n"
         f"\U0001f4dd {f['advice']}\n"
         f"\U0001f522 \u5e78\u8fd0\u6570\u5b57: {f['lucky_number']}"

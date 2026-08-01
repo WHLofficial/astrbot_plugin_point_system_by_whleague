@@ -181,5 +181,23 @@
     "type": "list",
     "items": {"type": "string"},
     "default": ["抽奖", "lottery"]
+  },
+  "cmd_map_user_cooldown": {
+    "description": "指令图用户冷却(秒)",
+    "hint": "同一用户生成指令图的最小间隔秒数，0 表示不限。",
+    "type": "int",
+    "default": 30
+  },
+  "cmd_map_group_cooldown": {
+    "description": "指令图群冷却(秒)",
+    "hint": "同一群生成指令图的最小间隔秒数，0 表示不限。",
+    "type": "int",
+    "default": 10
+  },
+  "cmd_map_cache_ttl_hours": {
+    "description": "指令图缓存有效期(小时)",
+    "hint": "指令图图片缓存的时长（小时），0 表示禁用缓存、每次重新渲染。",
+    "type": "int",
+    "default": 24
   }
 }

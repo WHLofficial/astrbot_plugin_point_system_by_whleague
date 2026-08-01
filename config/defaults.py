@@ -3,6 +3,13 @@ import math
 import os
 import re
 
+PLUGIN_VERSION = "0.1.3"
+"""插件版本号。
+
+需要与 metadata.yaml 的 version 保持一致（发布时同步更新）。
+参与指令图缓存签名：版本变化时自动强制重新渲染指令图。
+"""
+
 _SCHEMA_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "_conf_schema.json"
 )

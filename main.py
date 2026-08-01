@@ -1,16 +1,23 @@
+import asyncio
 import json
 from collections.abc import AsyncGenerator
-from astrbot.api.event import filter, AstrMessageEvent, MessageChain, MessageEventResult
-from astrbot.api.event.filter import EventMessageType
-from astrbot.api.star import Context, Star, register
-from astrbot.api import logger
-from astrbot.api.platform import MessageType
 
-from .config.defaults import DEFAULT_CONFIG, parse_keyword_list, _LIST_KEYS
-from .utils.helpers import set_day_boundary, today_str
+from astrbot.api import logger
+from astrbot.api.event import AstrMessageEvent, MessageChain, MessageEventResult, filter
+from astrbot.api.event.filter import EventMessageType
+from astrbot.api.platform import MessageType
+from astrbot.api.star import Context, Star, register
+
+from .config.defaults import (
+    _LIST_KEYS,
+    DEFAULT_CONFIG,
+    PLUGIN_VERSION,
+    parse_keyword_list,
+)
 from .db.connection import DatabaseManager
-from .db.schema import init_schema
 from .db.dao import PointDAO
+from .db.schema import init_schema
+from .utils.helpers import set_day_boundary, today_str
 from .utils.rate_limiter import RateLimiter
 
 _PLUGIN_COMMANDS = frozenset({
@@ -22,11 +29,12 @@ _PLUGIN_COMMANDS = frozenset({
     "\u5220\u9664\u65e5\u671f\u5956\u52b1", "\u67e5\u770b\u65e5\u671f\u5956\u52b1",
     "\u8bbe\u7f6e\u751f\u65e5", "\u67e5\u751f\u65e5", "\u6d41\u6c34",
     "\u6e05\u7a7a\u6570\u636e", "\u6e05\u7a7a\u5168\u90e8\u6570\u636e", "\u786e\u8ba4\u6e05\u7a7a",
+    "\u79ef\u5206\u7cfb\u7edf\u5e2e\u52a9", "\u6307\u4ee4\u56fe", "\u547d\u4ee4\u56fe", "\u5e2e\u52a9\u56fe",
 })
 
 
 @register("points_system", "WHLofficial",
-          "\u79ef\u5206\u7cfb\u7edf\u63d2\u4ef6\uff1a\u7b7e\u5230/\u62bd\u5956/\u5151\u6362/\u6392\u884c/\u751f\u65e5\u7b49", "0.1.2")
+          "\u79ef\u5206\u7cfb\u7edf\u63d2\u4ef6\uff1a\u7b7e\u5230/\u62bd\u5956/\u5151\u6362/\u6392\u884c/\u751f\u65e5\u7b49", PLUGIN_VERSION)
 class PointSystemPlugin(Star):
     def __init__(self, context: Context, config: dict | None = None):
         super().__init__(context)
@@ -45,21 +53,21 @@ class PointSystemPlugin(Star):
         set_day_boundary(self.config_cache.get("signin_refresh_time", "04:00"))
         self.rate_limiter = RateLimiter()
 
-        from .services.point_service import PointService
-        from .services.easter_service import EasterService
         from .services.date_reward_service import DateRewardService
+        from .services.easter_service import EasterService
+        from .services.point_service import PointService
 
         self.point_service = PointService(self.db, self.dao)
         self.easter_service = EasterService(self.dao)
         self.date_reward_service = DateRewardService(self.dao)
 
-        from .services.sign_in_service import SignInService
-        from .services.lottery_service import LotteryService
-        from .services.redeem_service import RedeemService
-        from .services.ranking_service import RankingService
-        from .services.daily_keyword_service import DailyKeywordService
-        from .services.birthday_service import BirthdayService
         from .services.backup_service import BackupService
+        from .services.birthday_service import BirthdayService
+        from .services.daily_keyword_service import DailyKeywordService
+        from .services.lottery_service import LotteryService
+        from .services.ranking_service import RankingService
+        from .services.redeem_service import RedeemService
+        from .services.sign_in_service import SignInService
 
         self.sign_in_service = SignInService(
             self.db, self.dao, self.point_service,
@@ -72,13 +80,13 @@ class PointSystemPlugin(Star):
         self.birthday_service = BirthdayService(self.dao)
         self.backup_service = BackupService(self.db, self.config_cache)
 
-        from .handlers.sign_in import SignInHandler
-        from .handlers.lottery import LotteryHandler
-        from .handlers.redeem import RedeemHandler
-        from .handlers.ranking import RankingHandler
+        from .handlers.active_reward import ActiveRewardHandler
         from .handlers.admin import AdminHandler
         from .handlers.birthday import BirthdayHandler
-        from .handlers.active_reward import ActiveRewardHandler
+        from .handlers.lottery import LotteryHandler
+        from .handlers.ranking import RankingHandler
+        from .handlers.redeem import RedeemHandler
+        from .handlers.sign_in import SignInHandler
 
         self.sign_in_handler = SignInHandler(self)
         self.lottery_handler = LotteryHandler(self)
@@ -87,6 +95,11 @@ class PointSystemPlugin(Star):
         self.admin_handler = AdminHandler(self)
         self.birthday_handler = BirthdayHandler(self)
         self.active_reward_handler = ActiveRewardHandler(self)
+
+        from .handlers.command_map import CommandMapHandler
+
+        self.command_map_handler = CommandMapHandler(self)
+        self._cache_sweep_task = asyncio.create_task(self.command_map_handler.sweep_loop())
 
         await self._start_cron_jobs()
 
@@ -396,6 +409,15 @@ class PointSystemPlugin(Star):
             yield r
 
     # ═══════════════════════════════════════════════════════════
+    # Handlers: Command map
+    # ═══════════════════════════════════════════════════════════
+
+    @filter.command("\u79ef\u5206\u7cfb\u7edf\u5e2e\u52a9", alias={"\u6307\u4ee4\u56fe", "\u547d\u4ee4\u56fe", "\u5e2e\u52a9\u56fe"})
+    async def cmd_command_map(self, event: AstrMessageEvent) -> AsyncGenerator[MessageEventResult, None]:
+        async for r in self.command_map_handler.handle(event):
+            yield r
+
+    # ═══════════════════════════════════════════════════════════
     # Handlers: Birthday
     # ═══════════════════════════════════════════════════════════
 
@@ -473,6 +495,11 @@ class PointSystemPlugin(Star):
     # ═══════════════════════════════════════════════════════════
 
     async def terminate(self) -> None:
+        if hasattr(self, "_cache_sweep_task") and self._cache_sweep_task:
+            try:
+                self._cache_sweep_task.cancel()
+            except Exception:
+                pass
         if hasattr(self, "_backup_job") and self._backup_job:
             try:
                 self._backup_job.remove()

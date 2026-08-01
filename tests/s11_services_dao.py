@@ -281,7 +281,17 @@ async def test_point_invalid_and_overdraw():
         await ps.add("nobody", "G2", 7, "test")
         row = await t.dao.get_user("nobody", "G2")
         assert row["points"] == 7
-    return "积分：非正数拒绝、超额扣分可成负数+头衔+流水、自动建行"
+        # 未注册用户扣分：自动建行并如实扣成负数（不再假成功/静默丢失）
+        r2 = await ps.subtract("ghost", "G3", 8, "admin_sub")
+        assert r2["balance"] == -8
+        row = await t.dao.get_user("ghost", "G3")
+        assert row is not None and row["points"] == -8
+        assert row["negative_title_id"] == 1  # 扣负后自动补头衔
+        txn = await t.db.fetchone(
+            "SELECT amount, balance_after FROM point_transactions WHERE qq='ghost' AND reason='admin_sub'"
+        )
+        assert txn["amount"] == -8 and txn["balance_after"] == -8
+    return "积分：非正数拒绝、超额扣分可成负数+头衔+流水、自动建行（含扣分建行）"
 
 
 async def test_point_ref_admin_trace():

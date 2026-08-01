@@ -1,10 +1,19 @@
 """S9 管理指令成功路径：加减分、商品增删改、口令、配置（含交叉校验/WebUI 落库）、折扣、管理员、日期奖励、全局清空全流程。"""
 
 import os
+import time
 import types
 from pathlib import Path
 
-from .common import FakeBot, FakeEvent, TempDB, base_cfg, collect
+from .common import (
+    FakeBot,
+    FakeEvent,
+    TempDB,
+    base_cfg,
+    collect,
+    restore_day_boundary,
+    snapshot_day_boundary,
+)
 
 
 class _FakeConfig(dict):
@@ -250,6 +259,66 @@ async def test_admin_view_config():
     return "管理：查看配置输出全键"
 
 
+async def test_admin_set_config_hot_reload():
+    async with TempDB() as t:
+        from astrbot_plugin_point_system_by_whleague.utils import helpers as _helpers
+
+        boundary = snapshot_day_boundary()
+        try:
+            handler, _ = await _admin_plugin(t)
+            rescheduled = []
+
+            async def _reschedule():
+                rescheduled.append(1)
+
+            handler._plugin.reschedule_cron_jobs = _reschedule
+            # signin_refresh_time：立即更新业务日分界（热生效）
+            ev = FakeEvent(
+                "admin", "G1", is_admin=True, msg="/设置 signin_refresh_time 06:30"
+            )
+            await collect(handler.set_config(ev))
+            assert handler._plugin.config_cache["signin_refresh_time"] == "06:30"
+            assert _helpers.get_day_boundary() == (6, 30)
+            # backup_time：触发 cron 重建
+            ev = FakeEvent("admin", "G1", is_admin=True, msg="/设置 backup_time 05:15")
+            await collect(handler.set_config(ev))
+            assert rescheduled == [1]
+            assert handler._plugin.config_cache["backup_time"] == "05:15"
+            # birthday_announce_time / backup_enabled 同样触发重建
+            ev = FakeEvent(
+                "admin", "G1", is_admin=True, msg="/设置 birthday_announce_time 09:00"
+            )
+            await collect(handler.set_config(ev))
+            assert rescheduled == [1, 1]
+        finally:
+            restore_day_boundary(boundary)
+    return "管理：/设置 时间类配置热生效（日界更新 + cron 重建）"
+
+
+async def test_pending_clear_prune():
+    async with TempDB() as t:
+        handler, _ = await _admin_plugin(t)
+        ev = FakeEvent("admin", "G1", is_admin=True)
+        await collect(handler.clear_data(ev, "group"))
+        assert "admin" in handler._pending_clears
+        # 过期条目在下次发起清空时被清理（仅保留新条目）
+        handler._pending_clears["admin"]["expires_at"] = time.time() - 1
+        await collect(handler.clear_data(ev, "group"))
+        assert set(handler._pending_clears) == {"admin"}
+        assert handler._pending_clears["admin"]["expires_at"] > time.time()
+        # confirm_clear 只清理他人过期条目；本人条目无论是否过期都会被 pop 消耗（单次有效）
+        await collect(handler.clear_data(FakeEvent("admin2", "G1", is_admin=True), "group"))
+        handler._pending_clears["admin"]["expires_at"] = 0
+        handler._pending_clears["admin2"]["expires_at"] = 0
+        token2 = handler._pending_clears["admin2"]["token"]
+        e = FakeEvent("admin2", "G1", is_admin=True, msg=f"/确认清空 {token2}")
+        msgs = await collect(handler.confirm_clear(e))
+        assert any("过期" in m for m in msgs), msgs
+        assert "admin" not in handler._pending_clears
+        assert "admin2" not in handler._pending_clears
+    return "管理：清空令牌过期清理（发起时 prune / 确认时保留本人）"
+
+
 async def test_admin_discount_handlers():
     async with TempDB() as t:
         handler, _ = await _admin_plugin(t)
@@ -394,6 +463,8 @@ TESTS = [
     ("admin_daily_keyword", test_admin_daily_keyword),
     ("admin_set_config", test_admin_set_config),
     ("admin_set_config_webui", test_admin_set_config_webui_path),
+    ("admin_set_config_hot_reload", test_admin_set_config_hot_reload),
+    ("pending_clear_prune", test_pending_clear_prune),
     ("admin_view_config", test_admin_view_config),
     ("admin_discount_handlers", test_admin_discount_handlers),
     ("admin_add_remove_admin", test_admin_add_remove_admin),

@@ -170,7 +170,12 @@ async def test_fortune_format():
     text = format_fortune("123", "2026-08-01", "小明")
     assert "小明" in text and f["level"] in text and f["advice"] in text
     assert "幸运数字" in text and str(f["lucky_number"]) in text
-    return "运势：字段结构/文案包含姓名/等级/建议/幸运数字"
+    # 昵称含换行/控制字符：控制字符被剥离，无法通过昵称构造额外的伪造消息行
+    evil = "小明\r\n⚠️ 群公告：全体禁言\x00"
+    text2 = format_fortune("123", "2026-08-01", evil)
+    assert "\r" not in text2 and "\x00" not in text2
+    assert text2.count("\n") == 4  # 仅保留正常行分隔，昵称未引入新行
+    return "运势：字段结构/文案包含姓名/等级/建议/幸运数字/控制字符剥离"
 
 
 def today_nodash() -> str:

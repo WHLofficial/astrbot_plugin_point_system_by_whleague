@@ -357,6 +357,10 @@ async def test_main_routes():
                 self.calls.append(("redeem", item_id, quantity))
                 yield event.plain_result(f"兑换 {item_id} x{quantity}")
 
+            async def list_records(self, event, target, page="1"):
+                self.calls.append(("records", target, page))
+                yield event.plain_result("记录")
+
         obj = PointSystemPlugin.__new__(PointSystemPlugin)
         # on_sign_in：唤醒命令（流水）跳过签到
         obj.sign_in_handler = _SignInHandler()
@@ -376,6 +380,17 @@ async def test_main_routes():
             "list",
             ("redeem", "1", "1"),
             ("redeem", "1", "2"),
+        ]
+        # cmd_redeem_records：纯数字视为页码，all/pending/R 前缀保持原语义
+        await collect(obj.cmd_redeem_records(FakeEvent("u1", "G1", msg="/兑换记录 2")))
+        await collect(obj.cmd_redeem_records(FakeEvent("u1", "G1", msg="/兑换记录 all 3")))
+        await collect(
+            obj.cmd_redeem_records(FakeEvent("u1", "G1", msg="/兑换记录 R20260101-0001"))
+        )
+        assert obj.redeem_handler.calls[-3:] == [
+            ("records", None, "2"),
+            ("records", "all", "3"),
+            ("records", "R20260101-0001", "1"),
         ]
         # _start_cron_jobs：备份+生日两个任务
         obj.config_cache = base_cfg(
@@ -406,7 +421,58 @@ async def test_main_routes():
             "points_backup",
             "birthday_announce",
         }
-    return "main 路由：wake 跳过/兑换参数路由/cron 注册与时间回退"
+        # 非法播报时间同样回退默认（不再中断整个 cron 注册）
+        obj4 = PointSystemPlugin.__new__(PointSystemPlugin)
+        obj4.config_cache = base_cfg(
+            backup_enabled=True, backup_time="04:00", birthday_announce_time="99:99"
+        )
+        obj4.context = FakeContext()
+        await obj4._start_cron_jobs()
+        assert {j["name"] for j in obj4.context.cron_jobs} == {
+            "points_backup",
+            "birthday_announce",
+        }
+        # reschedule：先移除旧任务再重建
+        obj5 = PointSystemPlugin.__new__(PointSystemPlugin)
+        obj5.config_cache = base_cfg(
+            backup_enabled=True, backup_time="04:00", birthday_announce_time="08:00"
+        )
+        obj5.context = FakeContext()
+        await obj5._start_cron_jobs()
+        obj5._backup_job = types.SimpleNamespace(
+            name="points_backup", remove=lambda: obj5.context.cron_jobs.clear()
+        )
+        obj5._birthday_job = types.SimpleNamespace(
+            name="birthday_announce", remove=lambda: None
+        )
+        await obj5.reschedule_cron_jobs()
+        assert {j["name"] for j in obj5.context.cron_jobs} == {
+            "points_backup",
+            "birthday_announce",
+        }
+        # on_lottery / on_ranking 处理结束后 stop_event
+        class _StopRecorder(FakeEvent):
+            def __init__(self, *a, **k):
+                super().__init__(*a, **k)
+                self.stopped = 0
+
+            def stop_event(self):
+                self.stopped += 1
+
+        class _SimpleHandler:
+            async def handle(self, event):
+                yield event.plain_result("ok")
+
+        obj.lottery_handler = _SimpleHandler()
+        ev = _StopRecorder("u1", "G1", msg="抽奖")
+        msgs = await collect(obj.on_lottery(ev))
+        assert msgs == ["ok"]
+        assert ev.stopped == 1
+        obj.ranking_handler = _SimpleHandler()
+        ev2 = _StopRecorder("u1", "G1", msg="排行")
+        await collect(obj.on_ranking(ev2))
+        assert ev2.stopped == 1
+    return "main 路由：wake 跳过/兑换参数路由/兑换记录页码/cron 注册与重建/stop_event"
 
 
 TESTS = [

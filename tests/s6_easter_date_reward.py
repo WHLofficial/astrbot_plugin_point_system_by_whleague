@@ -181,6 +181,9 @@ async def test_easter_signin_unlucky_integration():
             r = await svc.sign_in("u1", "G1", "aiocqhttp", "签到")
         # 基础95 + 负彩蛋-100 = -5
         assert r["points"] == -5, r["points"]
+        # 负总积分显示格式：-5 而非 "+-5"
+        assert "获得 -5 积分" in r["msg"], r["msg"]
+        assert "+-5" not in r["msg"]
         row = await t.dao.get_user("u1", "G1")
         # 非酋负事件不计入累计获得：total_earned = 95
         assert row["points"] == -5 and row["total_earned"] == 95

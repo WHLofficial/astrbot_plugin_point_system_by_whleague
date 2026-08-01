@@ -1,4 +1,4 @@
-from typing import Optional
+
 from astrbot.api import logger
 
 # 不计入 total_earned（累计获得）的加分 reason：均为"扣减型"操作（消耗/扣除/负彩蛋），
@@ -15,8 +15,8 @@ class PointService:
 
     async def add(
         self, qq: str, group_id: str, amount: int,
-        reason: str, ref_id: Optional[int] = None, admin_override: bool = False,
-        admin_qq: Optional[str] = None, bot=None,
+        reason: str, ref_id: int | None = None, admin_override: bool = False,
+        admin_qq: str | None = None, bot=None,
     ) -> dict:
         if amount <= 0:
             raise ValueError("Amount must be positive")
@@ -61,8 +61,8 @@ class PointService:
 
     async def subtract(
         self, qq: str, group_id: str, amount: int,
-        reason: str, ref_id: Optional[int] = None,
-        admin_qq: Optional[str] = None, bot=None,
+        reason: str, ref_id: int | None = None,
+        admin_qq: str | None = None, bot=None,
     ) -> dict:
         if amount <= 0:
             raise ValueError("Amount must be positive")
@@ -74,13 +74,12 @@ class PointService:
             ) as cur:
                 row = await cur.fetchone()
             balance = row[0] if row else 0
-            if balance < amount:
-                raise ValueError(f"Insufficient points: have {balance}, need {amount}")
+            # 允许扣成负数（管理员惩罚场景），扣负后由 ensure_negative_title 补发负分头衔
+            new_balance = balance - amount
             await conn.execute(
                 "UPDATE users SET points=points-?, updated_at=datetime('now','localtime') WHERE qq=? AND group_id=?",
                 (amount, qq, group_id),
             )
-            new_balance = balance - amount
             await conn.execute(
                 "INSERT INTO point_transactions (qq, group_id, amount, balance_after, reason, ref_id, admin_qq) VALUES (?,?,?,?,?,?,?)",
                 (qq, group_id, -amount, new_balance, reason, ref_id, admin_qq),
@@ -160,7 +159,7 @@ class PointService:
         balance = await self.get_balance(qq, group_id)
         return balance < 0
 
-    async def _fetch_group_card(self, bot, qq: str, group_id: str) -> Optional[str]:
+    async def _fetch_group_card(self, bot, qq: str, group_id: str) -> str | None:
         call = getattr(bot, "call_action", None)
         if not call:
             return None

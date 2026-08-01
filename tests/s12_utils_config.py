@@ -1,0 +1,190 @@
+"""S12 工具函数与配置解析边界：parse_keyword_list、业务日分界、today/period 一致性、跨年区间、兑换编号、安全解析、运势文案。"""
+
+from datetime import datetime, timedelta
+
+from .common import TempDB, restore_day_boundary, snapshot_day_boundary
+
+
+async def test_parse_keyword_list():
+    from astrbot_plugin_point_system_by_whleague.config.defaults import (
+        parse_keyword_list,
+    )
+
+    assert parse_keyword_list(["签到", "sign"]) == ["签到", "sign"]
+    assert parse_keyword_list(("a", "", "b")) == ["a", "b"]
+    assert parse_keyword_list('["a","b"]') == ["a", "b"]
+    assert parse_keyword_list("a,b,c") == ["a", "b", "c"]
+    assert parse_keyword_list(" a , b ") == ["a", "b"]  # 逗号分隔去空格
+    assert parse_keyword_list("") == []
+    assert parse_keyword_list(None) == []
+    assert parse_keyword_list(123) == []
+    assert parse_keyword_list("not json but comma,separated") == [
+        "not json but comma",
+        "separated",
+    ]
+    return "parse_keyword_list：list/元组/JSON/逗号/空/非法输入"
+
+
+async def test_day_boundary_parse():
+    from astrbot_plugin_point_system_by_whleague.utils.helpers import (
+        get_day_boundary,
+        set_day_boundary,
+    )
+
+    saved = snapshot_day_boundary()
+    try:
+        assert set_day_boundary("04:00") == (4, 0)
+        assert set_day_boundary("4:00") == (4, 0)  # 单数字小时规范化
+        assert set_day_boundary("23:59") == (23, 59)
+        assert set_day_boundary("25:00") == (4, 0)  # 非法回退默认
+        assert set_day_boundary("abc") == (4, 0)
+        assert set_day_boundary("") == (4, 0)
+        assert get_day_boundary() == (4, 0)
+    finally:
+        restore_day_boundary(saved)
+    return "业务日分界：解析/单数字/非法回退默认"
+
+
+async def test_today_period_consistency():
+    from astrbot_plugin_point_system_by_whleague.utils.helpers import (
+        period_start_str,
+        set_day_boundary,
+        today_mmdd,
+        today_str,
+    )
+
+    saved = snapshot_day_boundary()
+    try:
+        for value in ("00:00", "04:00", "12:30", "23:59"):
+            set_day_boundary(value)
+            h, m = value.split(":")
+            h, m = int(h), int(m)
+            shifted = datetime.now() - timedelta(hours=h, minutes=m)
+            assert today_str() == shifted.date().isoformat(), value
+            assert today_mmdd() == shifted.date().strftime("%m-%d"), value
+            day = (datetime.now() - timedelta(hours=h, minutes=m)).date()
+            assert (
+                period_start_str() == day.strftime("%Y-%m-%d") + f" {h:02d}:{m:02d}:00"
+            ), value
+    finally:
+        restore_day_boundary(saved)
+    return "today_str/today_mmdd/period_start_str 与分界一致"
+
+
+async def test_is_date_in_range():
+    from astrbot_plugin_point_system_by_whleague.utils.helpers import is_date_in_range
+
+    assert is_date_in_range("01-01", "01-01") is True  # 单日
+    assert is_date_in_range("01-02", "01-01") is False
+    assert is_date_in_range("01-05", "01-01", "01-31") is True
+    assert is_date_in_range("01-01", "01-01", "01-31") is True  # 起点包含
+    assert is_date_in_range("01-31", "01-01", "01-31") is True  # 终点包含
+    assert is_date_in_range("02-01", "01-01", "01-31") is False
+    assert is_date_in_range("12-31", "12-30", "01-02") is True  # 跨年
+    assert is_date_in_range("01-01", "12-30", "01-02") is True
+    assert is_date_in_range("06-01", "12-30", "01-02") is False
+    return "is_date_in_range：单日/区间/端点/跨年包裹"
+
+
+async def test_generate_record_no():
+    async with TempDB() as t:
+        from astrbot_plugin_point_system_by_whleague.utils.helpers import (
+            generate_record_no,
+        )
+
+        async def gen(prefix=None):
+            async def _tx(conn):
+                return await generate_record_no(conn, prefix)
+
+            return await t.db.execute_transaction(_tx)
+
+        assert await gen() == f"R{today_nodash()}-0001"
+        item_id = await t.dao.add_item("商品", 10, 5)
+        await t.db.execute(
+            "INSERT INTO redeem_records (record_no, qq, group_id, item_id, item_name, item_cost) "
+            "VALUES (?, 'u1','G1',?,'x',1)",
+            (f"R{today_nodash()}-0001", item_id),
+        )
+        assert await gen() == f"R{today_nodash()}-0002"
+        assert await gen("20260101") == "R20260101-0001"  # 自定义日期前缀独立计数
+    return "兑换编号：按日期前缀递增、自定义前缀"
+
+
+async def test_security_parsers():
+    from astrbot_plugin_point_system_by_whleague.utils.security import (
+        parse_int,
+        parse_qq,
+        parse_qq_arg,
+        sanitize_text,
+    )
+
+    # parse_qq
+    assert parse_qq("12345") == "12345"
+    assert parse_qq("@12345") == "12345"
+    assert parse_qq(" 12345 ") == "12345"
+    for bad in ("abc", "12a", ""):
+        try:
+            parse_qq(bad)
+            raise AssertionError(bad)
+        except ValueError:
+            pass
+    # parse_qq_arg 各形态
+    assert parse_qq_arg("[CQ:at,qq=123]") == "123"
+    assert parse_qq_arg("@昵称(456)") == "456"
+    assert parse_qq_arg("昵称(789)") == "789"
+    assert parse_qq_arg("@456") == "456"
+    assert parse_qq_arg("456") is None  # 纯数字按页码处理
+    assert parse_qq_arg("@u2") is None
+    assert parse_qq_arg("") is None
+    # parse_int 边界
+    assert parse_int("42") == 42
+    assert parse_int(" 7 ") == 7
+    for bad in ("abc", "1.5", ""):
+        try:
+            parse_int(bad)
+            raise AssertionError(bad)
+        except ValueError:
+            pass
+    try:
+        parse_int("5", min_val=10)
+        raise AssertionError("min_val 应拒绝")
+    except ValueError:
+        pass
+    # sanitize_text
+    assert sanitize_text("  abc  ") == "abc"
+    assert sanitize_text("") == ""
+    assert sanitize_text("x" * 500) == "x" * 200
+    assert sanitize_text(None) == ""
+    return "安全解析：QQ/at 形态/整数边界/截断"
+
+
+async def test_fortune_format():
+    from astrbot_plugin_point_system_by_whleague.utils.fortune import (
+        format_fortune,
+        get_fortune,
+    )
+
+    f = get_fortune("123", "2026-08-01")
+    assert set(f.keys()) == {"level", "lucky_number", "advice"}
+    assert 1 <= f["lucky_number"] <= 99
+    text = format_fortune("123", "2026-08-01", "小明")
+    assert "小明" in text and f["level"] in text and f["advice"] in text
+    assert "幸运数字" in text and str(f["lucky_number"]) in text
+    return "运势：字段结构/文案包含姓名/等级/建议/幸运数字"
+
+
+def today_nodash() -> str:
+    from astrbot_plugin_point_system_by_whleague.utils.helpers import today_str
+
+    return today_str().replace("-", "")
+
+
+TESTS = [
+    ("parse_keyword_list", test_parse_keyword_list),
+    ("day_boundary_parse", test_day_boundary_parse),
+    ("today_period_consistency", test_today_period_consistency),
+    ("is_date_in_range", test_is_date_in_range),
+    ("generate_record_no", test_generate_record_no),
+    ("security_parsers", test_security_parsers),
+    ("fortune_format", test_fortune_format),
+]

@@ -3,20 +3,18 @@
 安全声明：全部在临时库上进行；注入 payload 只会验证"被参数化拒绝"，
 不会对生产数据产生任何影响。
 """
-import asyncio
-import json
+
 import os
 import tempfile
 
-from .common import TempDB, FakeEvent, collect
-
+from .common import FakeEvent, TempDB, collect
 
 # ── SQL 注入 fuzz ─────────────────────────────────────────
 
 _INJECT_PAYLOADS = [
     "'; DROP TABLE users;--",
     "'; DELETE FROM point_transactions;--",
-    "\" OR 1=1 --",
+    '" OR 1=1 --',
     "1 OR 1=1",
     "1; SELECT * FROM users",
     "') OR ('1'='1",
@@ -29,7 +27,9 @@ _INJECT_PAYLOADS = [
 
 async def test_sql_injection_fuzz():
     async with TempDB() as t:
-        await t.db.execute("INSERT INTO users (qq, group_id, points) VALUES ('victim','G1',10)")
+        await t.db.execute(
+            "INSERT INTO users (qq, group_id, points) VALUES ('victim','G1',10)"
+        )
         before_users = await t.count("users")
 
         for i, payload in enumerate(_INJECT_PAYLOADS):
@@ -48,7 +48,10 @@ async def test_sql_injection_fuzz():
                 pass
 
         # /设置 路径（validate_and_cast）
-        from astrbot_plugin_point_system_by_whleague.config.defaults import validate_and_cast
+        from astrbot_plugin_point_system_by_whleague.config.defaults import (
+            validate_and_cast,
+        )
+
         for payload in _INJECT_PAYLOADS:
             try:
                 validate_and_cast("lottery_passphrase", payload)
@@ -70,14 +73,17 @@ async def test_sql_injection_fuzz():
 async def test_path_traversal_backup():
     """backup_dirs 恶意路径：不越权写入、单引号路径正确转义。"""
     async with TempDB() as t:
-        from astrbot_plugin_point_system_by_whleague.services.backup_service import BackupService
+        from astrbot_plugin_point_system_by_whleague.services.backup_service import (
+            BackupService,
+        )
+
         svc = BackupService(t.db, {"backup_dirs": []})
         base = tempfile.mkdtemp(prefix="backup_target_")
         targets = [
-            base,                                    # 正常绝对路径
-            os.path.join(base, "sub dir'quote"),     # 含空格与单引号
+            base,  # 正常绝对路径
+            os.path.join(base, "sub dir'quote"),  # 含空格与单引号
             os.path.join(base, "..", "..", "..", "..", "escape_check"),  # 相对 .. 上跳
-            os.path.expanduser("~"),                 # ~ 展开（不写入，仅验证解析）
+            os.path.expanduser("~"),  # ~ 展开（不写入，仅验证解析）
         ]
         for i, target in enumerate(targets):
             resolved = svc._resolve(target)
@@ -104,16 +110,27 @@ async def test_path_traversal_backup():
 
 
 async def _admin_plugin(t):
-    from astrbot_plugin_point_system_by_whleague.services.backup_service import BackupService
-    from astrbot_plugin_point_system_by_whleague.handlers.admin import AdminHandler
     import types as _t
+
+    from astrbot_plugin_point_system_by_whleague.handlers.admin import AdminHandler
+    from astrbot_plugin_point_system_by_whleague.services.backup_service import (
+        BackupService,
+    )
+
     backup = BackupService(t.db, {"backup_dirs": []})
     plugin = _t.SimpleNamespace(
-        db=t.db, dao=t.dao, backup_service=backup,
-        config_cache={}, config=None,
+        db=t.db,
+        dao=t.dao,
+        backup_service=backup,
+        config_cache={},
+        config=None,
         daily_keyword_service=_t.SimpleNamespace(invalidate=lambda g: None),
-        point_service=_t.SimpleNamespace(add=_add_points, subtract=_sub_points, _set_group_card=_noop),
-        redeem_service=_t.SimpleNamespace(set_discount=_noop_dict, clear_discount=_noop_dict),
+        point_service=_t.SimpleNamespace(
+            add=_add_points, subtract=_sub_points, _set_group_card=_noop
+        ),
+        redeem_service=_t.SimpleNamespace(
+            set_discount=_noop_dict, clear_discount=_noop_dict
+        ),
         sign_in_service=None,
     )
     return AdminHandler(plugin)
@@ -181,8 +198,12 @@ async def test_permission_matrix():
 async def test_cross_group_isolation():
     """跨群隔离：本群管理员看不到其他群的兑换记录（C2 回归）。"""
     async with TempDB() as t:
-        from astrbot_plugin_point_system_by_whleague.handlers.redeem import RedeemHandler
         import types as _t
+
+        from astrbot_plugin_point_system_by_whleague.handlers.redeem import (
+            RedeemHandler,
+        )
+
         item_id = await t.dao.add_item("商品", 10, 10)
         await t.db.execute(
             "INSERT INTO redeem_records (record_no, qq, group_id, item_id, item_name, item_cost) "
@@ -216,24 +237,36 @@ async def test_cross_group_isolation():
 
 async def test_clear_token_security():
     async with TempDB() as t:
-        from astrbot_plugin_point_system_by_whleague.services.backup_service import BackupService
-        from astrbot_plugin_point_system_by_whleague.handlers.admin import AdminHandler
         import types as _t
+
+        from astrbot_plugin_point_system_by_whleague.handlers.admin import AdminHandler
+        from astrbot_plugin_point_system_by_whleague.services.backup_service import (
+            BackupService,
+        )
+
         backup = BackupService(t.db, {"backup_dirs": []})
         plugin = _t.SimpleNamespace(
-            db=t.db, dao=t.dao, backup_service=backup,
+            db=t.db,
+            dao=t.dao,
+            backup_service=backup,
             point_service=_t.SimpleNamespace(_set_group_card=_noop),
         )
         handler = AdminHandler(plugin)
-        await t.db.execute("INSERT INTO users (qq, group_id, points) VALUES ('u1','G1',1)")
+        await t.db.execute(
+            "INSERT INTO users (qq, group_id, points) VALUES ('u1','G1',1)"
+        )
 
         ev = FakeEvent("admin", "G1", is_admin=True)
         await collect(handler.clear_data(ev, "group"))
-        token = handler._pending_clears["admin"]["token"]
 
         # 100 次错误验证码：全部拒绝；首次错误即消耗令牌
         for i in range(100):
-            e = FakeEvent("admin", "G1", is_admin=True, msg=f"/确认清空 {000000 if i == 0 else 999999}")
+            e = FakeEvent(
+                "admin",
+                "G1",
+                is_admin=True,
+                msg=f"/确认清空 {000000 if i == 0 else 999999}",
+            )
             msgs = await collect(handler.confirm_clear(e))
             assert any("错误" in m for m in msgs), (i, msgs)
             if i == 0:
@@ -266,7 +299,9 @@ async def test_clear_token_security():
 
 async def test_numeric_boundaries():
     """NaN/Infinity/超大/负值/零值：拒绝或钳制，不崩溃不越界。"""
-    from astrbot_plugin_point_system_by_whleague.config.defaults import validate_and_cast
+    from astrbot_plugin_point_system_by_whleague.config.defaults import (
+        validate_and_cast,
+    )
 
     # NaN/Inf 对概率被拒绝
     for bad in ("nan", "inf", "-inf"):
@@ -288,6 +323,7 @@ async def test_numeric_boundaries():
 
     # 随机区间 min/max 填反：业务层钳制不报错
     import random
+
     for _ in range(50):
         lo, hi = 8, 2
         p = random.randint(min(lo, hi), max(lo, hi))
@@ -297,10 +333,16 @@ async def test_numeric_boundaries():
 
 async def test_oversized_inputs():
     """超长消息/名称/数量：截断或拒绝，不崩溃。"""
-    async with TempDB() as t:
-        from astrbot_plugin_point_system_by_whleague.utils.security import sanitize_text, parse_int
-        from astrbot_plugin_point_system_by_whleague.handlers.active_reward import ActiveRewardHandler
+    async with TempDB():
         import types as _t
+
+        from astrbot_plugin_point_system_by_whleague.handlers.active_reward import (
+            ActiveRewardHandler,
+        )
+        from astrbot_plugin_point_system_by_whleague.utils.security import (
+            parse_int,
+            sanitize_text,
+        )
 
         # sanitize_text 截断 200
         long_text = "x" * 10000
@@ -335,9 +377,13 @@ async def test_oversized_inputs():
             "active_reward_points_min": 1,
             "active_reward_points_max": 5,
         }
-        from astrbot_plugin_point_system_by_whleague.utils.rate_limiter import RateLimiter
+        from astrbot_plugin_point_system_by_whleague.utils.rate_limiter import (
+            RateLimiter,
+        )
+
         plugin = _t.SimpleNamespace(
-            config_cache=cfg, rate_limiter=RateLimiter(),
+            config_cache=cfg,
+            rate_limiter=RateLimiter(),
             daily_keyword_service=_t.SimpleNamespace(check_and_claim=_noop_dict),
         )
         handler = ActiveRewardHandler(plugin)
@@ -345,9 +391,98 @@ async def test_oversized_inputs():
         await handler.handle(ev)  # 不应抛异常
 
         # emoji/CQ 码混淆不崩溃
-        ev2 = FakeEvent("u1", "G1", is_admin=False, msg="[CQ:at,qq=123] @昵称(456) 😀 抽奖 whl")
+        ev2 = FakeEvent(
+            "u1", "G1", is_admin=False, msg="[CQ:at,qq=123] @昵称(456) 😀 抽奖 whl"
+        )
         await handler.handle(ev2)
     return "超长/混淆输入：截断、拒绝、处理不崩溃"
+
+
+async def test_field_whitelist_injection():
+    """update_item_field 字段白名单：SQL 注入字段名被拒绝，表不受影响。"""
+    async with TempDB() as t:
+        from astrbot_plugin_point_system_by_whleague.db.dao import PointDAO
+
+        item_id = await t.dao.add_item("商品", 10, 5)
+        before = await t.count("redeem_items")
+        for bad in (
+            "cost; DROP TABLE users;--",
+            "name='x' WHERE 1=1;--",
+            "points",
+            "id",
+            "is_active",
+            "stock, name",
+        ):
+            try:
+                await PointDAO(t.db).update_item_field(item_id, bad, 1)
+                raise AssertionError(f"字段 {bad} 应被拒绝")
+            except ValueError:
+                pass
+        assert await t.count("redeem_items") == before
+        assert await t.count("users") == 0  # users 表未被破坏
+        item = await t.dao.get_item(item_id)
+        assert item["name"] == "商品" and item["cost"] == 10
+    return "字段白名单：注入型字段名全部拒绝"
+
+
+async def test_lottery_tiers_non_finite():
+    """lottery_tiers 权重 NaN/Infinity：json.loads 接受但校验必须拒绝（防抽奖崩溃）。"""
+    from astrbot_plugin_point_system_by_whleague.config.defaults import (
+        validate_and_cast,
+    )
+
+    for bad in (
+        '{"tiers":[{"label":"x","weight":NaN,"points_min":1,"points_max":5}]}',
+        '{"tiers":[{"label":"x","weight":Infinity,"points_min":1,"points_max":5}]}',
+        '{"tiers":[{"label":"x","weight":-Infinity,"points_min":1,"points_max":5}]}',
+        '{"tiers":[{"label":"x","weight":"2","points_min":1,"points_max":5}]}',
+        '{"tiers":[{"label":"x","weight":2.5,"points_min":NaN,"points_max":5}]}',
+    ):
+        try:
+            validate_and_cast("lottery_tiers", bad)
+            raise AssertionError(bad)
+        except ValueError:
+            pass
+    # 合法有限值通过
+    ok = '{"tiers":[{"label":"x","weight":2.5,"points_min":1,"points_max":5}]}'
+    assert validate_and_cast("lottery_tiers", ok) == ok
+    return "lottery_tiers：NaN/Infinity/字符串权重被拒、有限值通过"
+
+
+async def test_date_reward_handler_bounds():
+    """日期奖励 handler：概率 NaN/Inf/越界、非法日期区间全部拒绝。"""
+    async with TempDB() as t:
+        import types as _t
+
+        from astrbot_plugin_point_system_by_whleague.handlers.admin import AdminHandler
+
+        handler = AdminHandler(
+            _t.SimpleNamespace(
+                dao=t.dao,
+                db=t.db,
+                config_cache={},
+                config=None,
+                point_service=_t.SimpleNamespace(),
+                redeem_service=_t.SimpleNamespace(),
+                daily_keyword_service=_t.SimpleNamespace(),
+                backup_service=_t.SimpleNamespace(),
+            )
+        )
+        for bad in ("1.5", "0", "-1", "nan", "inf", "abc"):
+            ev = FakeEvent(
+                "admin", "G1", is_admin=True, msg=f"/添加日期奖励 01-01 元旦 50 {bad}"
+            )
+            msgs = await collect(handler.add_date_reward(ev))
+            assert any("参数错误" in m for m in msgs), (bad, msgs)
+        # 非法日期/区间
+        for bad in ("13-01", "02-30", "12-30~bad"):
+            ev = FakeEvent(
+                "admin", "G1", is_admin=True, msg=f"/添加日期奖励 {bad} 元旦 50"
+            )
+            msgs = await collect(handler.add_date_reward(ev))
+            assert any("参数错误" in m for m in msgs), (bad, msgs)
+        assert await t.count("date_rewards") == 0
+    return "日期奖励：概率与日期边界全部拒绝、零落库"
 
 
 TESTS = [
@@ -358,4 +493,7 @@ TESTS = [
     ("clear_token_security", test_clear_token_security),
     ("numeric_boundaries", test_numeric_boundaries),
     ("oversized_inputs", test_oversized_inputs),
+    ("field_whitelist_injection", test_field_whitelist_injection),
+    ("lottery_tiers_non_finite", test_lottery_tiers_non_finite),
+    ("date_reward_handler_bounds", test_date_reward_handler_bounds),
 ]

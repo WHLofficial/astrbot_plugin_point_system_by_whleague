@@ -3,23 +3,20 @@
 注意：本套件为性能观测，不设硬性阈值（避免环境差异误报），
 但会校验"无退化信号"（如 10 万消息后内存增长有界）。
 """
+
 import asyncio
 import json
-import os
 import time
 import tracemalloc
 
-from .common import TempDB, FakeEvent, Timer, fmt_sec
+from .common import FakeEvent, TempDB, Timer, fmt_sec
 
 
 async def _seed_users(t, n, group="G1"):
     conn = t.db.conn
     await conn.execute("BEGIN")
     for i in range(0, n, 500):
-        batch = [
-            (f"u{i + j}", group, (i + j) % 1000)
-            for j in range(min(500, n - i))
-        ]
+        batch = [(f"u{i + j}", group, (i + j) % 1000) for j in range(min(500, n - i))]
         await conn.executemany(
             "INSERT INTO users (qq, group_id, points) VALUES (?,?,?)", batch
         )
@@ -31,8 +28,7 @@ async def _seed_transactions(t, n, qq="u1", group="G1"):
     await conn.execute("BEGIN")
     for i in range(0, n, 500):
         batch = [
-            (qq, group, (i + j) % 50 - 25, 100, "bench")
-            for j in range(min(500, n - i))
+            (qq, group, (i + j) % 50 - 25, 100, "bench") for j in range(min(500, n - i))
         ]
         await conn.executemany(
             "INSERT INTO point_transactions (qq, group_id, amount, balance_after, reason) VALUES (?,?,?,?,?)",
@@ -42,9 +38,12 @@ async def _seed_transactions(t, n, qq="u1", group="G1"):
 
 
 async def _scan_handler(t, cfg):
-    from astrbot_plugin_point_system_by_whleague.handlers.active_reward import ActiveRewardHandler
-    from astrbot_plugin_point_system_by_whleague.utils.rate_limiter import RateLimiter
     import types as _t
+
+    from astrbot_plugin_point_system_by_whleague.handlers.active_reward import (
+        ActiveRewardHandler,
+    )
+    from astrbot_plugin_point_system_by_whleague.utils.rate_limiter import RateLimiter
 
     plugin = _t.SimpleNamespace(
         config_cache=cfg,
@@ -61,12 +60,23 @@ async def _noop_coro():
 
 
 async def _signin_svc(t, cfg):
-    from astrbot_plugin_point_system_by_whleague.services.point_service import PointService
-    from astrbot_plugin_point_system_by_whleague.services.easter_service import EasterService
-    from astrbot_plugin_point_system_by_whleague.services.date_reward_service import DateRewardService
-    from astrbot_plugin_point_system_by_whleague.services.sign_in_service import SignInService
+    from astrbot_plugin_point_system_by_whleague.services.date_reward_service import (
+        DateRewardService,
+    )
+    from astrbot_plugin_point_system_by_whleague.services.easter_service import (
+        EasterService,
+    )
+    from astrbot_plugin_point_system_by_whleague.services.point_service import (
+        PointService,
+    )
+    from astrbot_plugin_point_system_by_whleague.services.sign_in_service import (
+        SignInService,
+    )
+
     ps = PointService(t.db, t.dao)
-    return SignInService(t.db, t.dao, ps, EasterService(t.dao), DateRewardService(t.dao), cfg)
+    return SignInService(
+        t.db, t.dao, ps, EasterService(t.dao), DateRewardService(t.dao), cfg
+    )
 
 
 async def bench_msg_scan():
@@ -97,10 +107,14 @@ async def bench_signin():
     """2000 次顺序签到 + 200 并发签到吞吐。"""
     async with TempDB() as t:
         cfg = {
-            "signin_fixed_mode": True, "signin_fixed_points": 10,
-            "signin_first_bonus": 50, "signin_day_first_bonus": 30,
-            "signin_consecutive_max": 30, "signin_consecutive_bonus_per_day": 5,
-            "signin_weekly_bonus": 100, "birthday_bonus_points": 0,
+            "signin_fixed_mode": True,
+            "signin_fixed_points": 10,
+            "signin_first_bonus": 50,
+            "signin_day_first_bonus": 30,
+            "signin_consecutive_max": 30,
+            "signin_consecutive_bonus_per_day": 5,
+            "signin_weekly_bonus": 100,
+            "birthday_bonus_points": 0,
         }
         svc = await _signin_svc(t, cfg)
         timer = Timer()
@@ -109,9 +123,9 @@ async def bench_signin():
         seq_elapsed = timer.elapsed()
 
         timer2 = Timer()
-        await asyncio.gather(*[
-            svc.sign_in(f"c{i}", "G2", "aiocqhttp", "签到") for i in range(200)
-        ])
+        await asyncio.gather(
+            *[svc.sign_in(f"c{i}", "G2", "aiocqhttp", "签到") for i in range(200)]
+        )
         conc_elapsed = timer2.elapsed()
         return {
             "场景": "签到吞吐",
@@ -147,7 +161,9 @@ async def bench_transactions_paging():
         await _seed_transactions(t, 50000)
         timer = Timer()
         for page in range(1, 101):
-            await t.dao.get_transactions(qq="u1", group_id="G1", limit=10, offset=(page - 1) * 10)
+            await t.dao.get_transactions(
+                qq="u1", group_id="G1", limit=10, offset=(page - 1) * 10
+            )
         elapsed = timer.elapsed()
         return {
             "场景": "5 万流水分页 ×100",
@@ -160,15 +176,37 @@ async def bench_lottery():
     """1000 次抽奖吞吐。"""
     async with TempDB() as t:
         cfg = {
-            "lottery_enabled": True, "lottery_cost": 10, "lottery_daily_limit": 0,
-            "lottery_passphrase": "whl", "negative_disable_lottery": True,
-            "lottery_tiers": json.dumps({"tiers": [{"label": "参与奖", "weight": 1, "points_min": 0, "points_max": 0, "emoji": ""}]}),
+            "lottery_enabled": True,
+            "lottery_cost": 10,
+            "lottery_daily_limit": 0,
+            "lottery_passphrase": "whl",
+            "negative_disable_lottery": True,
+            "lottery_tiers": json.dumps(
+                {
+                    "tiers": [
+                        {
+                            "label": "参与奖",
+                            "weight": 1,
+                            "points_min": 0,
+                            "points_max": 0,
+                            "emoji": "",
+                        }
+                    ]
+                }
+            ),
         }
-        from astrbot_plugin_point_system_by_whleague.services.point_service import PointService
-        from astrbot_plugin_point_system_by_whleague.services.lottery_service import LotteryService
+        from astrbot_plugin_point_system_by_whleague.services.lottery_service import (
+            LotteryService,
+        )
+        from astrbot_plugin_point_system_by_whleague.services.point_service import (
+            PointService,
+        )
+
         ps = PointService(t.db, t.dao)
         svc = LotteryService(t.db, t.dao, ps, cfg)
-        await t.db.execute("INSERT INTO users (qq, group_id, points) VALUES ('u1','G1',100000)")
+        await t.db.execute(
+            "INSERT INTO users (qq, group_id, points) VALUES ('u1','G1',100000)"
+        )
         timer = Timer()
         for _ in range(1000):
             await svc.draw("u1", "G1")
@@ -185,9 +223,7 @@ async def bench_concurrent_reads():
     async with TempDB() as t:
         await _seed_users(t, 5000)
         timer = Timer()
-        await asyncio.gather(*[
-            t.dao.get_top_n_by_group("G1", 10) for _ in range(200)
-        ])
+        await asyncio.gather(*[t.dao.get_top_n_by_group("G1", 10) for _ in range(200)])
         elapsed = timer.elapsed()
         return {
             "场景": "200 并发读排行（锁串行化基线）",
@@ -209,7 +245,7 @@ async def bench_memory_stability():
         handler = await _scan_handler(t, cfg)
 
         # 预热 RateLimiter 键（制造剪枝压力）
-        from astrbot_plugin_point_system_by_whleague.utils.rate_limiter import RateLimiter
+
         limiter = handler._plugin.rate_limiter
         for i in range(3000):
             limiter._user_cooldowns[f"action:u{i}:G1"] = time.time() - 7200
@@ -221,9 +257,7 @@ async def bench_memory_stability():
         after = tracemalloc.take_snapshot()
         tracemalloc.stop()
 
-        growth = sum(
-            s.size_diff for s in after.compare_to(before, "filename")
-        )
+        growth = sum(s.size_diff for s in after.compare_to(before, "filename"))
         # 触发剪枝后应回落
         limiter.check_user("x", "u1", "G1", 60)
         pruned = len(limiter._user_cooldowns) <= 3000
@@ -236,8 +270,15 @@ async def bench_memory_stability():
 
 async def main():
     results = []
-    for fn in (bench_msg_scan, bench_signin, bench_ranking, bench_transactions_paging,
-               bench_lottery, bench_concurrent_reads, bench_memory_stability):
+    for fn in (
+        bench_msg_scan,
+        bench_signin,
+        bench_ranking,
+        bench_transactions_paging,
+        bench_lottery,
+        bench_concurrent_reads,
+        bench_memory_stability,
+    ):
         try:
             r = await asyncio.wait_for(fn(), timeout=300)
             results.append((fn.__name__, r))
@@ -247,9 +288,11 @@ async def main():
 
 
 if __name__ == "__main__":
+
     async def _run():
         for name, metrics in await main():
             print(f"[{name}]")
             for k, v in metrics.items():
                 print(f"  {k}: {v}")
+
     asyncio.run(_run())

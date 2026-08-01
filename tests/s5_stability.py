@@ -1,13 +1,17 @@
 """S5 稳定性/故障注入：DB 损坏、事务回滚、busy 重试、重载循环、备份失败。"""
+
 import asyncio
 import os
 import tempfile
 
 import aiosqlite
+from astrbot_plugin_point_system_by_whleague.db.connection import DatabaseManager
+from astrbot_plugin_point_system_by_whleague.db.schema import (
+    SCHEMA_VERSION,
+    init_schema,
+)
 
 from .common import TempDB
-from astrbot_plugin_point_system_by_whleague.db.connection import DatabaseManager
-from astrbot_plugin_point_system_by_whleague.db.schema import init_schema, SCHEMA_VERSION
 
 
 async def test_corrupt_db_file():
@@ -31,9 +35,13 @@ async def test_corrupt_db_file():
 async def test_schema_version_corrupt():
     """schema_version 损坏：自动重写为当前版本（回归）。"""
     async with TempDB() as t:
-        await t.db.execute("UPDATE plugin_config SET value='oops' WHERE key='schema_version'")
+        await t.db.execute(
+            "UPDATE plugin_config SET value='oops' WHERE key='schema_version'"
+        )
         await init_schema(t.db)
-        row = await t.db.fetchone("SELECT value FROM plugin_config WHERE key='schema_version'")
+        row = await t.db.fetchone(
+            "SELECT value FROM plugin_config WHERE key='schema_version'"
+        )
         assert row and row["value"] == str(SCHEMA_VERSION)
     return "schema_version 损坏：自动修复"
 
@@ -41,10 +49,14 @@ async def test_schema_version_corrupt():
 async def test_transaction_rollback():
     """事务中途异常：全部回滚，数据一致。"""
     async with TempDB() as t:
-        await t.db.execute("INSERT INTO users (qq, group_id, points) VALUES ('u1','G1',10)")
+        await t.db.execute(
+            "INSERT INTO users (qq, group_id, points) VALUES ('u1','G1',10)"
+        )
 
         async def bad_tx(conn):
-            await conn.execute("INSERT INTO users (qq, group_id, points) VALUES ('u2','G1',20)")
+            await conn.execute(
+                "INSERT INTO users (qq, group_id, points) VALUES ('u2','G1',20)"
+            )
             await conn.execute("UPDATE users SET points=points-100 WHERE qq='u1'")
             raise RuntimeError("boom")
 
@@ -71,7 +83,9 @@ async def test_busy_retry():
 
             async def writer():
                 await asyncio.sleep(0.3)
-                await t.db.execute("INSERT INTO users (qq, group_id, points) VALUES ('u1','G1',1)")
+                await t.db.execute(
+                    "INSERT INTO users (qq, group_id, points) VALUES ('u1','G1',1)"
+                )
 
             async def unlocker():
                 await asyncio.sleep(1.2)
@@ -98,7 +112,9 @@ async def test_reload_cycles():
         db = DatabaseManager(path)
         await db.init()
         await init_schema(db)
-        await db.execute("INSERT INTO users (qq, group_id, points) VALUES (?,?,1)", (f"u{i}", "G1"))
+        await db.execute(
+            "INSERT INTO users (qq, group_id, points) VALUES (?,?,1)", (f"u{i}", "G1")
+        )
         await db.close()
         assert db._conn is None
     db = DatabaseManager(path)
@@ -112,7 +128,10 @@ async def test_reload_cycles():
 async def test_backup_failure_isolated():
     """备份目标异常（目标是文件而非目录）：单目标失败不影响整体，不崩溃。"""
     async with TempDB() as t:
-        from astrbot_plugin_point_system_by_whleague.services.backup_service import BackupService
+        from astrbot_plugin_point_system_by_whleague.services.backup_service import (
+            BackupService,
+        )
+
         svc = BackupService(t.db, {"backup_dirs": []})
         # 目标路径是文件 → mkdir 失败
         tmp = tempfile.mkdtemp(prefix="backup_fail_")
@@ -125,7 +144,6 @@ async def test_backup_failure_isolated():
         except Exception:
             pass
         # run_backup 多目标：失败目标被隔离
-        good = os.path.join(tmp, "good")
         results = await svc.run_backup()  # 空 targets → 跳过
         assert results is None
         # 数据库仍可用
@@ -157,6 +175,7 @@ async def test_wal_crash_recovery():
 async def test_deadlock_guard():
     """死锁断言：事务回调内调用 db 方法抛清晰错误（回归 M1）。"""
     async with TempDB() as t:
+
         async def bad(conn):
             await t.db.fetchone("SELECT 1")
 

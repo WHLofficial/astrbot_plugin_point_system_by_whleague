@@ -8,6 +8,7 @@
 安全声明：所有测试仅使用 tempfile 创建的临时 SQLite 库，
 绝不触碰生产数据库（data/plugin_data/ 下的 points_system.db）。
 """
+
 import asyncio
 import importlib
 import sys
@@ -27,6 +28,17 @@ SUITES = [
     ("s3_security", "安全测试"),
     ("s4_performance", "性能压测"),
     ("s5_stability", "稳定性/故障注入"),
+    ("s6_easter_date_reward", "彩蛋/日期奖励"),
+    ("s7_birthday", "生日系统"),
+    ("s8_active_reward", "活跃奖励"),
+    ("s9_admin_success", "管理指令成功路径"),
+    ("s10_handler_layer", "用户侧 Handler/Main 路由"),
+    ("s11_services_dao", "服务边界/积分/DAO"),
+    ("s12_utils_config", "工具/配置解析"),
+    ("s13_rate_limiter", "限流器"),
+    ("s14_backup_restore", "备份恢复"),
+    ("s15_migration", "schema/配置迁移"),
+    ("s16_stress", "压力/浸泡/随机化"),
 ]
 
 
@@ -39,7 +51,12 @@ async def _run_one(fn, name):
         return False, "超时（挂死）", time.perf_counter() - t0
     except Exception as e:
         import traceback
-        return False, f"{type(e).__name__}: {e}\n{traceback.format_exc()}", time.perf_counter() - t0
+
+        return (
+            False,
+            f"{type(e).__name__}: {e}\n{traceback.format_exc()}",
+            time.perf_counter() - t0,
+        )
 
 
 def main() -> int:
@@ -52,6 +69,7 @@ def main() -> int:
             mod = importlib.import_module(f"tests.{module_name}")
         except Exception as e:
             import traceback
+
             print(f"  套件导入失败: {e}\n{traceback.format_exc()}")
             total_fail += 1
             continue
@@ -86,5 +104,10 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.path.insert(0, __import__("os").path.dirname(__import__("os").path.dirname(__import__("os").path.abspath(__file__))))
+    sys.path.insert(
+        0,
+        __import__("os").path.dirname(
+            __import__("os").path.dirname(__import__("os").path.abspath(__file__))
+        ),
+    )
     sys.exit(main())

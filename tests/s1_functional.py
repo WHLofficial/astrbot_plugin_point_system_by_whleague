@@ -1,13 +1,15 @@
 """S1 功能正确性回归：签到/抽奖/兑换/口令/排行/头衔/配置/清空。"""
-import asyncio
+
 import json
 
-from .common import TempDB, FakeEvent, collect
+from .common import FakeEvent, TempDB, collect
 
 
 async def test_signin_fixed_mode():
     async with TempDB() as t:
-        await t.db.execute("UPDATE easter_events SET is_active=0")  # 停用彩蛋，精确断言积分
+        await t.db.execute(
+            "UPDATE easter_events SET is_active=0"
+        )  # 停用彩蛋，精确断言积分
         cfg = {
             "signin_fixed_mode": True,
             "signin_fixed_points": 10,
@@ -20,10 +22,18 @@ async def test_signin_fixed_mode():
             "signin_weekly_bonus": 100,
             "birthday_bonus_points": 100,
         }
-        from astrbot_plugin_point_system_by_whleague.services.point_service import PointService
-        from astrbot_plugin_point_system_by_whleague.services.easter_service import EasterService
-        from astrbot_plugin_point_system_by_whleague.services.date_reward_service import DateRewardService
-        from astrbot_plugin_point_system_by_whleague.services.sign_in_service import SignInService
+        from astrbot_plugin_point_system_by_whleague.services.date_reward_service import (
+            DateRewardService,
+        )
+        from astrbot_plugin_point_system_by_whleague.services.easter_service import (
+            EasterService,
+        )
+        from astrbot_plugin_point_system_by_whleague.services.point_service import (
+            PointService,
+        )
+        from astrbot_plugin_point_system_by_whleague.services.sign_in_service import (
+            SignInService,
+        )
 
         ps = PointService(t.db, t.dao)
         easter = EasterService(t.dao)
@@ -41,7 +51,11 @@ async def test_signin_fixed_mode():
         row = await t.db.fetchone(
             "SELECT points, total_earned, total_sign_days FROM users WHERE qq='u1' AND group_id='G1'"
         )
-        assert row["points"] == 95 and row["total_earned"] == 95 and row["total_sign_days"] == 1
+        assert (
+            row["points"] == 95
+            and row["total_earned"] == 95
+            and row["total_sign_days"] == 1
+        )
     return "固定模式签到：首次奖励/连签/去重/入账一致"
 
 
@@ -60,13 +74,23 @@ async def test_signin_random_mode():
             "signin_weekly_bonus": 0,
             "birthday_bonus_points": 0,
         }
-        from astrbot_plugin_point_system_by_whleague.services.point_service import PointService
-        from astrbot_plugin_point_system_by_whleague.services.easter_service import EasterService
-        from astrbot_plugin_point_system_by_whleague.services.date_reward_service import DateRewardService
-        from astrbot_plugin_point_system_by_whleague.services.sign_in_service import SignInService
+        from astrbot_plugin_point_system_by_whleague.services.date_reward_service import (
+            DateRewardService,
+        )
+        from astrbot_plugin_point_system_by_whleague.services.easter_service import (
+            EasterService,
+        )
+        from astrbot_plugin_point_system_by_whleague.services.point_service import (
+            PointService,
+        )
+        from astrbot_plugin_point_system_by_whleague.services.sign_in_service import (
+            SignInService,
+        )
 
         ps = PointService(t.db, t.dao)
-        svc = SignInService(t.db, t.dao, ps, EasterService(t.dao), DateRewardService(t.dao), cfg)
+        svc = SignInService(
+            t.db, t.dao, ps, EasterService(t.dao), DateRewardService(t.dao), cfg
+        )
         for i in range(200):
             r = await svc.sign_in(f"u{i}", "G1", "aiocqhttp", "签到")
             assert not r["already_signed"] and 1 <= r["points"] <= 20
@@ -77,17 +101,36 @@ async def test_signin_day_first_and_streak():
     async with TempDB() as t:
         await t.db.execute("UPDATE easter_events SET is_active=0")
         cfg = {
-            "signin_fixed_mode": True, "signin_fixed_points": 10,
-            "signin_first_bonus": 0, "signin_day_first_bonus": 30,
-            "signin_consecutive_max": 30, "signin_consecutive_bonus_per_day": 5,
-            "signin_weekly_bonus": 100, "birthday_bonus_points": 0,
+            "signin_fixed_mode": True,
+            "signin_fixed_points": 10,
+            "signin_first_bonus": 0,
+            "signin_day_first_bonus": 30,
+            "signin_consecutive_max": 30,
+            "signin_consecutive_bonus_per_day": 5,
+            "signin_weekly_bonus": 100,
+            "birthday_bonus_points": 0,
         }
-        from astrbot_plugin_point_system_by_whleague.services.point_service import PointService
-        from astrbot_plugin_point_system_by_whleague.services.easter_service import EasterService
-        from astrbot_plugin_point_system_by_whleague.services.date_reward_service import DateRewardService
-        from astrbot_plugin_point_system_by_whleague.services.sign_in_service import SignInService
+        from astrbot_plugin_point_system_by_whleague.services.date_reward_service import (
+            DateRewardService,
+        )
+        from astrbot_plugin_point_system_by_whleague.services.easter_service import (
+            EasterService,
+        )
+        from astrbot_plugin_point_system_by_whleague.services.point_service import (
+            PointService,
+        )
+        from astrbot_plugin_point_system_by_whleague.services.sign_in_service import (
+            SignInService,
+        )
 
-        svc = SignInService(t.db, t.dao, PointService(t.db, t.dao), EasterService(t.dao), DateRewardService(t.dao), cfg)
+        svc = SignInService(
+            t.db,
+            t.dao,
+            PointService(t.db, t.dao),
+            EasterService(t.dao),
+            DateRewardService(t.dao),
+            cfg,
+        )
         r = await svc.sign_in("a", "G1", "aiocqhttp", "签到")
         assert r["points"] == 10 + 30 + 5, r  # 基础 10 + 每日首签 30 + 连签第1天 5
         r = await svc.sign_in("b", "G1", "aiocqhttp", "签到")
@@ -103,8 +146,12 @@ async def test_signin_day_first_and_streak():
         # 连签 6 → 7 触发周奖励
         await t.db.execute("DELETE FROM sign_in_log WHERE qq='a' AND group_id='G1'")
         from datetime import datetime, timedelta
+
         from astrbot_plugin_point_system_by_whleague.utils.helpers import today_str
-        yesterday = (datetime.strptime(today_str(), "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
+
+        yesterday = (
+            datetime.strptime(today_str(), "%Y-%m-%d") - timedelta(days=1)
+        ).strftime("%Y-%m-%d")
         await t.db.execute(
             "UPDATE users SET last_sign_date=?, consecutive_days=6 WHERE qq='a' AND group_id='G1'",
             (yesterday,),
@@ -117,6 +164,7 @@ async def test_signin_day_first_and_streak():
 
 async def test_fortune_deterministic():
     from astrbot_plugin_point_system_by_whleague.utils.fortune import get_fortune
+
     a = get_fortune("12345", "2026-08-01")
     b = get_fortune("12345", "2026-08-01")
     c = get_fortune("12345", "2026-08-02")
@@ -130,21 +178,44 @@ async def test_fortune_deterministic():
 async def test_lottery_tiers_and_limit():
     async with TempDB() as t:
         cfg = {
-            "lottery_enabled": True, "lottery_cost": 10, "lottery_daily_limit": 5,
-            "lottery_passphrase": "whl", "negative_disable_lottery": True,
-            "lottery_tiers": json.dumps({
-                "tiers": [
-                    {"label": "一等奖", "weight": 1, "points_min": 30, "points_max": 30, "emoji": "🏆"},
-                    {"label": "参与奖", "weight": 99, "points_min": 0, "points_max": 0, "emoji": "✨"},
-                ]
-            }),
+            "lottery_enabled": True,
+            "lottery_cost": 10,
+            "lottery_daily_limit": 5,
+            "lottery_passphrase": "whl",
+            "negative_disable_lottery": True,
+            "lottery_tiers": json.dumps(
+                {
+                    "tiers": [
+                        {
+                            "label": "一等奖",
+                            "weight": 1,
+                            "points_min": 30,
+                            "points_max": 30,
+                            "emoji": "🏆",
+                        },
+                        {
+                            "label": "参与奖",
+                            "weight": 99,
+                            "points_min": 0,
+                            "points_max": 0,
+                            "emoji": "✨",
+                        },
+                    ]
+                }
+            ),
         }
-        from astrbot_plugin_point_system_by_whleague.services.point_service import PointService
-        from astrbot_plugin_point_system_by_whleague.services.lottery_service import LotteryService
+        from astrbot_plugin_point_system_by_whleague.services.lottery_service import (
+            LotteryService,
+        )
+        from astrbot_plugin_point_system_by_whleague.services.point_service import (
+            PointService,
+        )
 
         ps = PointService(t.db, t.dao)
         svc = LotteryService(t.db, t.dao, ps, cfg)
-        await t.db.execute("INSERT INTO users (qq, group_id, points) VALUES ('u1','G1',10000)")
+        await t.db.execute(
+            "INSERT INTO users (qq, group_id, points) VALUES ('u1','G1',10000)"
+        )
         ok = 0
         for _ in range(8):
             r = await svc.draw("u1", "G1")
@@ -165,13 +236,19 @@ async def test_lottery_tiers_and_limit():
 
 async def test_redeem_stock_discount_verify():
     async with TempDB() as t:
-        from astrbot_plugin_point_system_by_whleague.services.point_service import PointService
-        from astrbot_plugin_point_system_by_whleague.services.redeem_service import RedeemService
+        from astrbot_plugin_point_system_by_whleague.services.point_service import (
+            PointService,
+        )
+        from astrbot_plugin_point_system_by_whleague.services.redeem_service import (
+            RedeemService,
+        )
 
         ps = PointService(t.db, t.dao)
         svc = RedeemService(t.db, t.dao, ps)
         item_id = await t.dao.add_item("商品A", 100, 2)
-        await t.db.execute("INSERT INTO users (qq, group_id, points) VALUES ('u1','G1',500)")
+        await t.db.execute(
+            "INSERT INTO users (qq, group_id, points) VALUES ('u1','G1',500)"
+        )
         r = await svc.redeem("u1", "G1", item_id, 2)
         assert r["success"], r
         rec = await t.db.fetchone("SELECT * FROM redeem_records WHERE qq='u1'")
@@ -181,6 +258,7 @@ async def test_redeem_stock_discount_verify():
         assert not r["success"] and "库存" in r["msg"]
         # 折扣设置与过期
         from datetime import datetime, timedelta
+
         end = (datetime.now() + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
         r = await svc.set_discount(item_id, 50, end)
         assert r["success"]
@@ -203,8 +281,12 @@ async def test_redeem_stock_discount_verify():
 
 async def test_daily_keyword():
     async with TempDB() as t:
-        from astrbot_plugin_point_system_by_whleague.services.point_service import PointService
-        from astrbot_plugin_point_system_by_whleague.services.daily_keyword_service import DailyKeywordService
+        from astrbot_plugin_point_system_by_whleague.services.daily_keyword_service import (
+            DailyKeywordService,
+        )
+        from astrbot_plugin_point_system_by_whleague.services.point_service import (
+            PointService,
+        )
 
         ps = PointService(t.db, t.dao)
         svc = DailyKeywordService(t.db, t.dao, ps)
@@ -214,7 +296,9 @@ async def test_daily_keyword():
         r = await svc.check_and_claim("u1", "G1", "红包又来了")
         assert r.get("already") is True
         # 负分拦截（未领取过口令的新负分用户）
-        await t.db.execute("INSERT INTO users (qq, group_id, points) VALUES ('u3','G1',-5)")
+        await t.db.execute(
+            "INSERT INTO users (qq, group_id, points) VALUES ('u3','G1',-5)"
+        )
         r = await svc.check_and_claim("u3", "G1", "红包")
         assert r.get("blocked") is True
         # 缓存失效
@@ -227,7 +311,10 @@ async def test_daily_keyword():
 
 async def test_ranking_stats():
     async with TempDB() as t:
-        from astrbot_plugin_point_system_by_whleague.services.ranking_service import RankingService
+        from astrbot_plugin_point_system_by_whleague.services.ranking_service import (
+            RankingService,
+        )
+
         for i in range(5):
             await t.db.execute(
                 "INSERT INTO users (qq, group_id, points) VALUES (?,?,?)",
@@ -245,9 +332,14 @@ async def test_ranking_stats():
 
 async def test_negative_title_lifecycle():
     async with TempDB() as t:
-        from astrbot_plugin_point_system_by_whleague.services.point_service import PointService
+        from astrbot_plugin_point_system_by_whleague.services.point_service import (
+            PointService,
+        )
+
         ps = PointService(t.db, t.dao)
-        await t.db.execute("INSERT INTO users (qq, group_id, points) VALUES ('u1','G1',-10)")
+        await t.db.execute(
+            "INSERT INTO users (qq, group_id, points) VALUES ('u1','G1',-10)"
+        )
         # bot=None：仅维护 DB 状态
         new_id = await ps.ensure_negative_title("u1", "G1", bot=None)
         assert new_id == 1
@@ -263,13 +355,27 @@ async def test_negative_title_lifecycle():
 
 
 async def test_config_validate_full():
-    from astrbot_plugin_point_system_by_whleague.config.defaults import (
-        DEFAULT_CONFIG, TYPE_MAP, validate_and_cast, _LIST_KEYS,
-    )
     import json as _json
-    schema = _json.load(open(__import__("os").path.join(
-        __import__("os").path.dirname(__import__("os").path.dirname(__import__("os").path.abspath(__file__))),
-        "_conf_schema.json"), encoding="utf-8"))
+
+    from astrbot_plugin_point_system_by_whleague.config.defaults import (
+        DEFAULT_CONFIG,
+        TYPE_MAP,
+        validate_and_cast,
+    )
+
+    schema = _json.load(
+        open(
+            __import__("os").path.join(
+                __import__("os").path.dirname(
+                    __import__("os").path.dirname(
+                        __import__("os").path.abspath(__file__)
+                    )
+                ),
+                "_conf_schema.json",
+            ),
+            encoding="utf-8",
+        )
+    )
     assert set(DEFAULT_CONFIG.keys()) == set(schema.keys())
     assert set(TYPE_MAP.keys()) == set(schema.keys())
     # 全键类型转换
@@ -306,11 +412,16 @@ async def test_config_validate_full():
         except ValueError:
             pass
     # lottery_tiers 恶意输入
-    for bad in ("not json", "{}", '{"tiers":[]}', '{"tiers":[{"weight":1,"points_min":1,"points_max":5}]}',
-                '{"tiers":[{"label":"x","weight":0,"points_min":1,"points_max":5}]}',
-                '{"tiers":[{"label":"x","weight":1,"points_min":5,"points_max":1}]}',
-                '{"tiers":[{"label":"x","weight":1,"points_min":-1,"points_max":5}]}',
-                '{"tiers":[{"label":"x","weight":1,"multiplier":2}]}'):
+    for bad in (
+        "not json",
+        "{}",
+        '{"tiers":[]}',
+        '{"tiers":[{"weight":1,"points_min":1,"points_max":5}]}',
+        '{"tiers":[{"label":"x","weight":0,"points_min":1,"points_max":5}]}',
+        '{"tiers":[{"label":"x","weight":1,"points_min":5,"points_max":1}]}',
+        '{"tiers":[{"label":"x","weight":1,"points_min":-1,"points_max":5}]}',
+        '{"tiers":[{"label":"x","weight":1,"multiplier":2}]}',
+    ):
         try:
             validate_and_cast("lottery_tiers", bad)
             raise AssertionError(bad)
@@ -327,17 +438,24 @@ async def test_config_validate_full():
 
 async def test_clear_feature_regression():
     async with TempDB() as t:
-        from astrbot_plugin_point_system_by_whleague.services.backup_service import BackupService
-        from astrbot_plugin_point_system_by_whleague.handlers.admin import AdminHandler
-
         import types as _t
+
+        from astrbot_plugin_point_system_by_whleague.handlers.admin import AdminHandler
+        from astrbot_plugin_point_system_by_whleague.services.backup_service import (
+            BackupService,
+        )
+
         backup = BackupService(t.db, {"backup_dirs": []})
         plugin = _t.SimpleNamespace(
-            db=t.db, dao=t.dao, backup_service=backup,
+            db=t.db,
+            dao=t.dao,
+            backup_service=backup,
             point_service=_t.SimpleNamespace(_set_group_card=_async_noop),
         )
         handler = AdminHandler(plugin)
-        await t.db.execute("INSERT INTO users (qq, group_id, points) VALUES ('u1','G1',10)")
+        await t.db.execute(
+            "INSERT INTO users (qq, group_id, points) VALUES ('u1','G1',10)"
+        )
         ev = FakeEvent("admin", "G1", is_admin=True)
         msgs = await collect(handler.clear_data(ev, "group"))
         assert any("/确认清空" in m for m in msgs)

@@ -1,7 +1,9 @@
-"""astrbot.api 桩：测试环境无 AstrBot 运行时，此处替换 logger/event 依赖。
+"""astrbot.api 桩：测试环境无 AstrBot 运行时，此处替换 logger/event/star/platform 依赖。
 
 安全说明：本模块仅存在于 tests/ 目录，不随插件运行加载。
 """
+
+import enum
 import sys
 import types
 
@@ -20,6 +22,43 @@ class _Logger:
         pass
 
 
+class _MessageChain:
+    """链式消息构造桩：message()/at() 返回自身，str() 按序拼接文本与 @ 目标。"""
+
+    def __init__(self):
+        self._parts = []
+
+    def message(self, text):
+        self._parts.append(("text", str(text)))
+        return self
+
+    def at(self, qq, name=None):
+        self._parts.append(("at", str(qq)))
+        return self
+
+    def __str__(self):
+        return "".join(p[1] for p in self._parts)
+
+    def __repr__(self):
+        return f"_MessageChain({self._parts})"
+
+
+class _Star:
+    def __init__(self, context=None):
+        self.context = context
+
+
+def _passthrough(*a, **k):
+    def deco(fn):
+        return fn
+
+    return deco
+
+
+class _MessageType(enum.Enum):
+    GROUP_MESSAGE = "group_message"
+
+
 def install_stubs():
     if "astrbot" in sys.modules:
         return
@@ -27,9 +66,30 @@ def install_stubs():
     astrbot_pkg.__path__ = []
     api_pkg = types.ModuleType("astrbot.api")
     api_pkg.logger = _Logger()
+
     event_pkg = types.ModuleType("astrbot.api.event")
     event_pkg.MessageEventResult = types.SimpleNamespace
-    event_pkg.MessageChain = types.SimpleNamespace
+    event_pkg.MessageChain = _MessageChain
+    event_pkg.AstrMessageEvent = object
+
+    filter_mod = types.ModuleType("astrbot.api.event.filter")
+    filter_mod.regex = _passthrough
+    filter_mod.command = _passthrough
+    filter_mod.event_message_type = _passthrough
+    filter_mod.EventMessageType = types.SimpleNamespace(GROUP_MESSAGE="group_message")
+    event_pkg.filter = filter_mod
+    sys.modules["astrbot.api.event.filter"] = filter_mod
+
+    star_pkg = types.ModuleType("astrbot.api.star")
+    star_pkg.Context = object
+    star_pkg.Star = _Star
+    star_pkg.register = lambda *a, **k: lambda cls: cls
+    sys.modules["astrbot.api.star"] = star_pkg
+
+    platform_pkg = types.ModuleType("astrbot.api.platform")
+    platform_pkg.MessageType = _MessageType
+    sys.modules["astrbot.api.platform"] = platform_pkg
+
     sys.modules["astrbot"] = astrbot_pkg
     sys.modules["astrbot.api"] = api_pkg
     sys.modules["astrbot.api.event"] = event_pkg

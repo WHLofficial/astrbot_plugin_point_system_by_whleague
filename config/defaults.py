@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import re
 
@@ -48,13 +49,11 @@ DEFAULT_CONFIG = {
     for key, meta in _SCHEMA.items()
 }
 
-TYPE_MAP = {
-    key: _TYPE_MAP[meta["type"]]
-    for key, meta in _SCHEMA.items()
-}
+TYPE_MAP = {key: _TYPE_MAP[meta["type"]] for key, meta in _SCHEMA.items()}
 
 _KEYWORD_KEYS = tuple(
-    key for key, meta in _SCHEMA.items()
+    key
+    for key, meta in _SCHEMA.items()
     if meta["type"] == "list" and key in ("keyword_sign", "keyword_lottery")
 )
 _LIST_KEYS = tuple(key for key, meta in _SCHEMA.items() if meta["type"] == "list")
@@ -130,7 +129,11 @@ def validate_and_cast(key: str, raw: str):
                 weight = t.get("weight")
                 points_min = t.get("points_min")
                 points_max = t.get("points_max")
-                if not isinstance(weight, (int, float)) or weight <= 0:
+                if (
+                    not isinstance(weight, (int, float))
+                    or not math.isfinite(weight)
+                    or weight <= 0
+                ):
                     raise ValueError
                 if (
                     not isinstance(points_min, int)
@@ -142,18 +145,22 @@ def validate_and_cast(key: str, raw: str):
                 ):
                     raise ValueError
         except (json.JSONDecodeError, ValueError):
-            raise ValueError('lottery_tiers \u9700\u4e3a\u5408\u6cd5 JSON ({"tiers": [{"label": "...", "weight": >0, "points_min": 0~points_max, "points_max": int, ...}]})')
+            raise ValueError(
+                'lottery_tiers \u9700\u4e3a\u5408\u6cd5 JSON ({"tiers": [{"label": "...", "weight": >0, "points_min": 0~points_max, "points_max": int, ...}]})'
+            )
         return raw
 
     t = TYPE_MAP.get(key, str)
-    if t == bool:
+    if t is bool:
         low = raw.strip().lower()
         if low in ("true", "1", "yes"):
             return True
         if low in ("false", "0", "no"):
             return False
-        raise ValueError(f"\u914d\u7f6e {key} \u9700\u4e3a\u5e03\u5c14\u503c (true/false/1/0)")
-    if t == int:
+        raise ValueError(
+            f"\u914d\u7f6e {key} \u9700\u4e3a\u5e03\u5c14\u503c (true/false/1/0)"
+        )
+    if t is int:
         try:
             parsed = int(raw.strip())
         except ValueError:
@@ -161,7 +168,7 @@ def validate_and_cast(key: str, raw: str):
         if parsed < 0:
             raise ValueError(f"\u914d\u7f6e {key} \u4e0d\u80fd\u4e3a\u8d1f\u6570")
         return parsed
-    if t == float:
+    if t is float:
         try:
             parsed = float(raw.strip())
         except ValueError:

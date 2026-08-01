@@ -39,6 +39,7 @@ SUITES = [
     ("s14_backup_restore", "备份恢复"),
     ("s15_migration", "schema/配置迁移"),
     ("s16_stress", "压力/浸泡/随机化"),
+    ("s17_command_map", "指令图"),
 ]
 
 

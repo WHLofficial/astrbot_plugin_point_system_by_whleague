@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.1.4 (2026-08-01)
+
+### 修复
+
+- `/扣分` 目标用户从未注册（无 users 行）时不再"假成功"：`point_service.subtract` 自动建行后如实扣成负数，流水 `balance_after` 与实际余额一致，扣负自动补发负分头衔
+- `/兑换记录` 纯数字参数视为页码（与 `/流水` 一致）：`/兑换记录 2` 正确显示第 2 页，`all` / `pending` / 记录编号语义不变
+- 配置热生效：`/设置 signin_refresh_time` 立即更新业务日分界；`/设置 backup_time` / `birthday_announce_time` / `backup_enabled` 即时重建定时任务（先移除旧任务再注册，不再残留孤儿任务）；`birthday_announce_time` 非法值回退默认而非中断注册
+- `on_lottery` / `on_ranking` 处理结束后调用 `stop_event()`，与签到行为一致，避免抽奖/排行后 LLM 二次回复
+- 每日口令清除（`clear_daily_keyword`）两条 DELETE 合并为单事务，中途失败整体回滚，不再出现"领取记录已删、口令残留"导致的重复领取
+- 清空验证码令牌（`_pending_clears`）增加过期清理，长期未确认的条目不再驻留内存
+- 非酋彩蛋导致签到总获得为负时，回复文案正确显示 `-N 积分` 而非 `+-N`
+- 迁移时 `PRAGMA table_info` 游标补 `close()`，避免长连接资源泄漏
+- 全局清空后的彩蛋事件重播种改走持锁事务，消除与其他写操作的并发竞争
+- 运势文案对昵称剥离控制字符（`\r\n` 等），昵称无法再构造多行伪造消息
+- ruff 存量问题清理：`Optional` 注解现代化、导入排序、未用变量/导入（`db/dao.py`、`services/sign_in_service.py`、`handlers/admin.py`、`utils/fortune.py`）
+
+### 测试
+
+- 测试套件由 133 项扩充至 135 项：新增清空令牌过期清理（s9）；扩展未注册用户扣分自动建行（s11）、`/兑换记录` 页码路由与 cron 重建 / stop_event（s10）、`/设置` 时间类配置热生效（s9）、非酋彩蛋消息格式（s6）、运势昵称控制字符剥离（s12）
+
 ## v0.1.3 (2026-08-01)
 
 ### 新增

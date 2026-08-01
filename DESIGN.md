@@ -667,10 +667,10 @@ def get_ranking(group_id, top_n=10):
 async def cmd_verify(self, event: AstrMessageEvent):
     record_no = extract_arg(event)
     record = dao.get_redeem_record(record_no)
-    if record.status == 'pending':
-        dao.update_record_status(record_no, 'verified', admin_qq, note)
+    if record.status == "pending":
+        dao.update_record_status(record_no, "verified", admin_qq, note)
     else:
-        dao.update_record_status(record_no, 'pending', None, note)
+        dao.update_record_status(record_no, "pending", None, note)
 ```
 
 ### 7.10 兑换折扣
@@ -691,6 +691,8 @@ async def generate_record_no(dao):
     prefix = f"R{today}-"
     count = await dao.count_records_by_prefix(prefix)
     return f"{prefix}{count + 1:04d}"
+
+
 # R20260730-0001, R20260730-0002, ...
 ```
 
@@ -724,6 +726,7 @@ LEVELS = [
     ("大凶", 5, "非酋附体，建议签到转运。"),
 ]
 
+
 def get_fortune(qq: str, date_str: str) -> dict:
     seed = hash(f"{qq}_{date_str}")
     rng = random.Random(seed)
@@ -731,6 +734,7 @@ def get_fortune(qq: str, date_str: str) -> dict:
     lucky_num = rng.randint(1, 99)
     advice = rng.choice(ADVICE_LIST)
     return {"level": level, "lucky_number": lucky_num, "advice": advice}
+
 
 def format_fortune(qq, date_str, user_name) -> str:
     f = get_fortune(qq, date_str)

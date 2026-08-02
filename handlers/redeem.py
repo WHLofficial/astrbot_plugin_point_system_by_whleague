@@ -1,8 +1,9 @@
 from collections.abc import AsyncGenerator
-from typing import Optional
+
 from astrbot.api import logger
 from astrbot.api.event import MessageEventResult
-from ..utils.security import parse_int
+
+from ..utils.security import parse_int, sanitize_text
 
 
 class RedeemHandler:
@@ -13,7 +14,9 @@ class RedeemHandler:
         try:
             items = await self._plugin.redeem_service.list_items()
             if not items:
-                yield event.plain_result("\u6ca1\u6709\u53ef\u5151\u6362\u7684\u7269\u54c1")
+                yield event.plain_result(
+                    "\u6ca1\u6709\u53ef\u5151\u6362\u7684\u7269\u54c1"
+                )
                 return
             lines = ["\U0001f4e6 \u53ef\u5151\u6362\u7269\u54c1"]
             for it in items:
@@ -21,15 +24,21 @@ class RedeemHandler:
                 price = f"{it['cost']} \u79ef\u5206"
                 if it["discount_label"]:
                     price += f" (\u539f{it['original_cost']}, {it['discount_label']})"
-                lines.append(f"{it['id']}. {it['name']}  {price}  \u5e93\u5b58: {stock_str}")
+                lines.append(
+                    f"{it['id']}. {it['name']}  {price}  \u5e93\u5b58: {stock_str}"
+                )
                 if it["description"]:
                     lines.append(f"   {it['description']}")
             yield event.plain_result("\n".join(lines))
         except Exception as e:
             logger.error(f"List items error: {e}")
-            yield event.plain_result("\u67e5\u8be2\u5931\u8d25\uff0c\u5df2\u8bb0\u5f55\u9519\u8bef")
+            yield event.plain_result(
+                "\u67e5\u8be2\u5931\u8d25\uff0c\u5df2\u8bb0\u5f55\u9519\u8bef"
+            )
 
-    async def do_redeem(self, event, item_id_str: str, quantity_str: str = "1") -> AsyncGenerator[MessageEventResult, None]:
+    async def do_redeem(
+        self, event, item_id_str: str, quantity_str: str = "1"
+    ) -> AsyncGenerator[MessageEventResult, None]:
         try:
             qq = event.get_sender_id()
             group_id = event.get_group_id()
@@ -38,15 +47,21 @@ class RedeemHandler:
                 return
             item_id = parse_int(item_id_str, min_val=1)
             quantity = parse_int(quantity_str, min_val=1, max_val=999)
-            result = await self._plugin.redeem_service.redeem(qq, group_id, item_id, quantity, bot=getattr(event, "bot", None))
+            result = await self._plugin.redeem_service.redeem(
+                qq, group_id, item_id, quantity, bot=getattr(event, "bot", None)
+            )
             yield event.plain_result(result["msg"])
         except ValueError as e:
             yield event.plain_result(str(e))
         except Exception as e:
             logger.error(f"Redeem error: {e}")
-            yield event.plain_result("\u5151\u6362\u5931\u8d25\uff0c\u5df2\u8bb0\u5f55\u9519\u8bef")
+            yield event.plain_result(
+                "\u5151\u6362\u5931\u8d25\uff0c\u5df2\u8bb0\u5f55\u9519\u8bef"
+            )
 
-    async def list_records(self, event, target: Optional[str] = None, page_str: str = "1") -> AsyncGenerator[MessageEventResult, None]:
+    async def list_records(
+        self, event, target: str | None = None, page_str: str = "1"
+    ) -> AsyncGenerator[MessageEventResult, None]:
         try:
             qq = event.get_sender_id()
             group_id = event.get_group_id()
@@ -58,20 +73,31 @@ class RedeemHandler:
             if target and target.startswith("R"):
                 record = await self._plugin.dao.get_redeem_record(target)
                 if not record:
-                    yield event.plain_result(f"\u8bb0\u5f55 {target} \u4e0d\u5b58\u5728")
+                    yield event.plain_result(
+                        f"\u8bb0\u5f55 {target} \u4e0d\u5b58\u5728"
+                    )
                     return
                 if record["group_id"] != event.get_group_id() and not event.is_admin():
-                    yield event.plain_result("\u4f60\u65e0\u6743\u67e5\u770b\u5176\u4ed6\u7fa4\u7684\u8bb0\u5f55")
+                    yield event.plain_result(
+                        "\u4f60\u65e0\u6743\u67e5\u770b\u5176\u4ed6\u7fa4\u7684\u8bb0\u5f55"
+                    )
                     return
                 if record["qq"] != qq and not is_admin:
-                    yield event.plain_result("\u4f60\u65e0\u6743\u67e5\u770b\u8be5\u8bb0\u5f55")
+                    yield event.plain_result(
+                        "\u4f60\u65e0\u6743\u67e5\u770b\u8be5\u8bb0\u5f55"
+                    )
                     return
+                status_text = (
+                    "\u2714 \u5df2\u6838\u9500"
+                    if record["status"] == "verified"
+                    else "\u23f3 \u672a\u6838\u9500"
+                )
                 lines = [
                     f"\U0001f4cb \u5151\u6362\u8bb0\u5f55 {record['record_no']}",
                     f"\u7269\u54c1: {record['item_name']}",
                     f"\u6570\u91cf: {record['quantity']}",
                     f"\u6d88\u8017: {record['item_cost']} \u79ef\u5206",
-                    f"\u72b6\u6001: {'\u2714 \u5df2\u6838\u9500' if record['status'] == 'verified' else '\u23f3 \u672a\u6838\u9500'}",
+                    f"\u72b6\u6001: {status_text}",
                 ]
                 if record["admin_note"]:
                     lines.append(f"\u5907\u6ce8: {record['admin_note']}")
@@ -87,10 +113,15 @@ class RedeemHandler:
                     )
                 else:
                     records = await self._plugin.dao.get_redeem_records_all(
-                        status=status_filter, group_id=group_id, limit=limit, offset=offset
+                        status=status_filter,
+                        group_id=group_id,
+                        limit=limit,
+                        offset=offset,
                     )
             else:
-                records = await self._plugin.dao.get_redeem_records_by_user(qq, group_id=group_id, limit=limit, offset=offset)
+                records = await self._plugin.dao.get_redeem_records_by_user(
+                    qq, group_id=group_id, limit=limit, offset=offset
+                )
 
             if not records:
                 yield event.plain_result("\u6ca1\u6709\u8bb0\u5f55")
@@ -99,17 +130,25 @@ class RedeemHandler:
             lines = [f"\U0001f4cb \u5151\u6362\u8bb0\u5f55 (\u7b2c{page}\u9875)"]
             for r in records:
                 status_icon = "\u2714" if r["status"] == "verified" else "\u23f3"
-                lines.append(f"{status_icon} {r['record_no']} {r['item_name']}x{r['quantity']} {r['item_cost']}\u79ef\u5206")
+                lines.append(
+                    f"{status_icon} {r['record_no']} {r['item_name']}x{r['quantity']} {r['item_cost']}\u79ef\u5206"
+                )
             yield event.plain_result("\n".join(lines))
         except Exception as e:
             logger.error(f"List records error: {e}")
-            yield event.plain_result("\u67e5\u8be2\u5931\u8d25\uff0c\u5df2\u8bb0\u5f55\u9519\u8bef")
+            yield event.plain_result(
+                "\u67e5\u8be2\u5931\u8d25\uff0c\u5df2\u8bb0\u5f55\u9519\u8bef"
+            )
 
-    async def toggle_verify(self, event, record_no: str, note: str = "") -> AsyncGenerator[MessageEventResult, None]:
+    async def toggle_verify(
+        self, event, record_no: str, note: str = ""
+    ) -> AsyncGenerator[MessageEventResult, None]:
         try:
             qq = event.get_sender_id()
             if not await self._check_admin(event):
-                yield event.plain_result("\u4f60\u6ca1\u6709\u6743\u9650\u6267\u884c\u6b64\u64cd\u4f5c")
+                yield event.plain_result(
+                    "\u4f60\u6ca1\u6709\u6743\u9650\u6267\u884c\u6b64\u64cd\u4f5c"
+                )
                 return
 
             record = await self._plugin.dao.get_redeem_record(record_no)
@@ -117,15 +156,27 @@ class RedeemHandler:
                 yield event.plain_result(f"\u8bb0\u5f55 {record_no} \u4e0d\u5b58\u5728")
                 return
             if record["group_id"] != event.get_group_id():
-                yield event.plain_result("\u4f60\u65e0\u6743\u6838\u9500\u5176\u4ed6\u7fa4\u7684\u8bb0\u5f55")
+                yield event.plain_result(
+                    "\u4f60\u65e0\u6743\u6838\u9500\u5176\u4ed6\u7fa4\u7684\u8bb0\u5f55"
+                )
                 return
 
-            new_status = await self._plugin.dao.toggle_redeem_status(record_no, qq, note)
-            status_text = "\u2714 \u5df2\u6838\u9500" if new_status == "verified" else "\u23f3 \u5df2\u53d6\u6d88\u6838\u9500"
-            yield event.plain_result(f"\u8bb0\u5f55 {record_no} \u72b6\u6001\u5df2\u66f4\u6539\u4e3a: {status_text}")
+            new_status = await self._plugin.dao.toggle_redeem_status(
+                record_no, qq, sanitize_text(note)
+            )
+            status_text = (
+                "\u2714 \u5df2\u6838\u9500"
+                if new_status == "verified"
+                else "\u23f3 \u5df2\u53d6\u6d88\u6838\u9500"
+            )
+            yield event.plain_result(
+                f"\u8bb0\u5f55 {record_no} \u72b6\u6001\u5df2\u66f4\u6539\u4e3a: {status_text}"
+            )
         except Exception as e:
             logger.error(f"Toggle verify error: {e}")
-            yield event.plain_result("\u64cd\u4f5c\u5931\u8d25\uff0c\u5df2\u8bb0\u5f55\u9519\u8bef")
+            yield event.plain_result(
+                "\u64cd\u4f5c\u5931\u8d25\uff0c\u5df2\u8bb0\u5f55\u9519\u8bef"
+            )
 
     async def _check_admin(self, event) -> bool:
         if event.is_admin():

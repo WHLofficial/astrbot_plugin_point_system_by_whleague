@@ -636,10 +636,8 @@ class PointSystemPlugin(Star):
 
     async def terminate(self) -> None:
         if hasattr(self, "_cache_sweep_task") and self._cache_sweep_task:
-            try:
-                self._cache_sweep_task.cancel()
-            except Exception:
-                pass
+            self._cache_sweep_task.cancel()
+            await asyncio.gather(self._cache_sweep_task, return_exceptions=True)
         await self._remove_cron_jobs()
         if hasattr(self, "db"):
             await self.db.close()

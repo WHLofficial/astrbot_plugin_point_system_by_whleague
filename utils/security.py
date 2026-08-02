@@ -1,6 +1,5 @@
 import calendar
 import re
-from typing import Optional
 
 _MAX_TEXT_LENGTH = 200
 
@@ -8,7 +7,7 @@ _MAX_TEXT_LENGTH = 200
 def sanitize_text(text: str) -> str:
     if not text:
         return ""
-    text = text.strip()[: _MAX_TEXT_LENGTH]
+    text = text.strip()[:_MAX_TEXT_LENGTH]
     return text
 
 
@@ -19,7 +18,7 @@ def parse_qq(raw: str) -> str:
     return cleaned
 
 
-def parse_qq_arg(raw: str) -> Optional[str]:
+def parse_qq_arg(raw: str) -> str | None:
     """从 @用户 / @昵称(QQ) / 昵称(QQ) / [CQ:at,qq=...] 形式中提取 QQ 号。
 
     aiocqhttp 平台将 @ 段转为文本 ` @昵称(QQ号) `，纯数字参数按页码处理，
@@ -47,7 +46,7 @@ def parse_qq_arg(raw: str) -> Optional[str]:
     return None
 
 
-def parse_int(raw: str, min_val: Optional[int] = None, max_val: Optional[int] = None) -> int:
+def parse_int(raw: str, min_val: int | None = None, max_val: int | None = None) -> int:
     try:
         val = int(raw.strip())
     except (ValueError, TypeError):

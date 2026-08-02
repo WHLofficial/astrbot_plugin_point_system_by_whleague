@@ -47,35 +47,51 @@
 
 ## 2. 数据表设计
 
-### 2.1 users — 用户表
+### 2.1 accounts — 全局账户表（v0.2.0 新增，一号跨群共享）
+
+```sql
+CREATE TABLE IF NOT EXISTS accounts (
+    qq TEXT PRIMARY KEY,
+    platform TEXT NOT NULL DEFAULT '',
+    points INTEGER NOT NULL DEFAULT 0,          -- 全局共享余额
+    total_earned INTEGER NOT NULL DEFAULT 0,    -- 累计获得（全局）
+    last_sign_date TEXT,                         -- 全局签到日（全局限签 1 次）
+    consecutive_days INTEGER NOT NULL DEFAULT 0, -- 全局连签
+    total_sign_days INTEGER NOT NULL DEFAULT 0,  -- 全局累计签到天数
+    birthday TEXT,
+    birthday_year INTEGER,
+    lucky_pity INTEGER NOT NULL DEFAULT 0,       -- 彩蛋保底（全局）
+    unlucky_pity INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_accounts_points ON accounts(points DESC);
+```
+
+> 积分、签到状态、生日、彩蛋保底均为**账号级**数据，按 QQ 全局唯一。
+> 所有积分变动只允许经 `PointService.change_balance` 落账（见 7.14）。
+
+### 2.2 users — 用户表（仅存群级数据）
 
 ```sql
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     qq TEXT NOT NULL,
     group_id TEXT NOT NULL,
-    platform TEXT NOT NULL DEFAULT '',
-    points INTEGER NOT NULL DEFAULT 0,
-    total_earned INTEGER NOT NULL DEFAULT 0,
-    last_sign_date TEXT,
-    consecutive_days INTEGER NOT NULL DEFAULT 0,
-    max_consecutive_days INTEGER NOT NULL DEFAULT 0,
-    total_sign_days INTEGER NOT NULL DEFAULT 0,
-    birthday TEXT,
-    birthday_year INTEGER,
-    birthday_bonus_claimed INTEGER NOT NULL DEFAULT 0,
-    lucky_pity INTEGER NOT NULL DEFAULT 0,
-    unlucky_pity INTEGER NOT NULL DEFAULT 0,
     negative_title_id INTEGER,
+    negative_title_prev_card TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
     UNIQUE(qq, group_id)
 );
-CREATE INDEX IF NOT EXISTS idx_users_group_points ON users(group_id, points DESC);
 CREATE INDEX IF NOT EXISTS idx_users_qq ON users(qq);
 ```
 
-### 2.2 sign_in_log — 签到流水表
+> 每行 = 一个 QQ 在一个群的**成员关系**（含负分头衔群级状态）。
+> v0.2.0 起 users 不再存积分/签到/生日字段（迁入 accounts）；
+> `updated_at` 在签到事务内刷新，供全局榜"最近活跃群"归属判断。
+
+### 2.3 sign_in_log — 签到流水表
 
 ```sql
 CREATE TABLE IF NOT EXISTS sign_in_log (
@@ -95,9 +111,13 @@ CREATE TABLE IF NOT EXISTS sign_in_log (
     UNIQUE(qq, group_id, sign_date)
 );
 CREATE INDEX IF NOT EXISTS idx_sign_in_date ON sign_in_log(group_id, sign_date);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sign_in_log_qq_date ON sign_in_log(qq, sign_date);
 ```
 
-### 2.3 lottery_record — 抽奖流水表
+> `idx_sign_in_log_qq_date` 在数据库层强制"全局限签 1 次"（配合事务内查重）；
+> 迁移时先清理同 (qq, sign_date) 重复行（保留最早一条）再建索引。
+
+### 2.4 lottery_record — 抽奖流水表
 
 ```sql
 CREATE TABLE IF NOT EXISTS lottery_record (
@@ -404,6 +424,7 @@ astrbot_plugin_point_system_by_whleague/
 │   ├── rate_limiter.py           # 内存限速器（每用户冷却 + 全局冷却）
 │   ├── security.py               # 输入清洗 + 数值校验
 │   ├── fortune.py                # 每日运势文本生成
+│   ├── group_info.py             # 平台成员信息获取（get_group_member_info 唯一入口）
 │   └── helpers.py                # 日期格式化、编号生成等
 └── config/
     ├── __init__.py
@@ -528,9 +549,9 @@ if total_sign_days == 0:
 if no sign_in_log for today in this group:
     points_earned += signin_day_first_bonus
 
-# 4. 连签奖励（有上限）
+# 4. 连签奖励（有上限，从第 2 天起算：第 N 天 = (N-1) × per_day）
 effective = min(consecutive_days, signin_consecutive_max)
-points_earned += effective * signin_consecutive_bonus_per_day
+points_earned += max(0, effective - 1) * signin_consecutive_bonus_per_day
 
 # 5. 每7天奖励
 if consecutive_days > 0 and consecutive_days % 7 == 0:
@@ -548,9 +569,13 @@ if today == birthday:
 date_bonus = date_reward_service.check(sign_date, message)
 points_earned += date_bonus
 
-# 统一写流水
-point_service.add(qq, group_id, points_earned, reason="签到", ref_id=sign_in_log_id)
+# 统一写流水（accounts 全局余额 + point_transactions 记发生群）
+# 全局限签：签到前查 accounts.last_sign_date / 事务内查 sign_in_log(qq, sign_date)，
+#           同用户跨群同日只允许 1 次；每日首签奖励仍按群判定
 ```
+
+> v0.2.0 起签到状态（连签/累计天数/保底计数器）存于 accounts，跨群延续；
+> 积分入账走 `PointService.change_balance`（earned_amount 排除非酋负事件）。
 
 ### 7.2 彩蛋保底逻辑
 
@@ -593,40 +618,54 @@ for tier in tiers:
         break
 ```
 
-### 7.4 无前缀匹配规则
+### 7.4 无前缀触发规则（v0.2.1 起为严格匹配）
+
+消息压缩全部空白后（大小写不敏感），必须与合法形态**完全相等**才触发：
 
 ```python
-# 签到：消息包含 keyword_sign 列表中的任一关键词
-any(kw in msg for kw in config["keyword_sign"])
+norm(s) = "".join(s.split())
 
-# 抽奖：消息同时包含 lottery_passphrase 和 keyword_lottery 任一关键词
-(passphrase in msg) and any(kw in msg for kw in config["keyword_lottery"])
+# 签到：消息 == 某签到关键词
+norm(msg) == norm("签到") or norm(msg) == norm("sign") or ...
+
+# 抽奖：消息 == 抽奖关键词 / 口令+关键词 / 关键词+口令
+norm(msg) == norm("抽奖")
+        or norm(msg) == norm(passphrase) + norm("抽奖")
+        or norm(msg) == norm("抽奖") + norm(passphrase)
+
+# 排行：消息 == 某排行关键词（排行 / 排名 / 积分榜）
+norm(msg) == norm("排行") or ...
 ```
 
-### 7.5 负分头衔联动
+> - 带附加文本的消息（"我要签到"、"whl 今天抽奖"）**不触发**，作为普通聊天消息继续流转；
+>   触发 handler 仅在**产生实际输出**后才调用 `stop_event()`，普通消息不再被静默吞掉。
+> - 每日口令/活跃奖励仍为"包含"匹配（消息内含口令关键词即命中），与触发词严格匹配不冲突。
+> - `/设置今日口令` 有保留字校验：关键词不得等于触发词或构成「口令±触发词」组合，
+>   否则该形态消息会被触发词拦截、口令永远领不到（死锁）。
+
+### 7.5 负分头衔联动（v0.2.0：余额全局、头衔按群、回正全群清除）
 
 ```
-变负（points 从 >=0 变为 <0）：
-  1. BEGIN TRANSACTION
-  2. SELECT negative_title_id FROM users WHERE group_id=? AND negative_title_id IS NOT NULL
-  3. 找到最小未占用的正整数 → new_id
-  4. UPDATE users SET negative_title_id=new_id WHERE qq=? AND group_id=?
-  5. set_group_special_title(qq, group_id, f"群女仆{new_id}号")
-  6. COMMIT
+变负（accounts.points 从 >=0 变为 <0）：
+  1. 在触发操作的群懒加载头衔（其他群不预分配）
+  2. BEGIN TRANSACTION
+  3. SELECT negative_title_id FROM users WHERE group_id=? AND negative_title_id IS NOT NULL
+  4. 找到最小未占用的正整数 → new_id
+  5. UPDATE users SET negative_title_id=new_id, negative_title_prev_card=原名片 WHERE qq=? AND group_id=?
+  6. set_group_card(qq, group_id, f"群女仆{new_id}号")
+  7. COMMIT
 
-回正（points 从 <0 变为 >=0）：
-  1. 读取 negative_title_id
-  2. set_group_special_title(qq, group_id, "")
-  3. UPDATE users SET negative_title_id=NULL
-
-懒加载恢复（交互时检测）：
-  用户 points < 0 但 negative_title_id IS NULL → 重新分配
+回正（accounts.points 从 <0 变为 >=0）：
+  1. 遍历 get_user_groups(qq)（该用户全部群）
+  2. 对每个有头衔的群：set_group_card(qq, group_id, 原名片) + UPDATE users SET negative_title_id=NULL
 ```
+
+> 余额判断使用**全局余额**（accounts），任一群回正即清除全部群的头衔（跨群联动）。
 
 ### 7.6 负分用户限制
 
 ```python
-if user.points < 0:
+if account.points < 0:  # 全局余额
     allowed_operations = ["sign_in", "admin_add"]
     # lottery/ redeem/ active_reward/ daily_keyword → 拒绝
 ```
@@ -640,7 +679,7 @@ if user.points < 0:
 2. 消息字数 < active_reward_min_length？→ 跳过
 3. 消息含签到关键词？→ 跳过（签到优先，由 sign_in 处理）
 4. 消息同时含口令+抽奖关键词？→ 跳过（由 lottery 处理）
-5. 用户 points < 0？→ 跳过（负分仅可签到）
+5. 全局余额 < 0？→ 跳过（负分仅可签到）
 6. 用户冷却未到？→ 跳过（rate_limiter）
 7. 全局冷却未到？→ 跳过（rate_limiter, 全群每 N 秒最多 1 次）
 8. 随机概率命中？→ 发奖 + 回复消息
@@ -648,16 +687,21 @@ if user.points < 0:
 每日口令独立于活跃奖励并列检查（同一消息可触发两者）
 ```
 
-### 7.8 排名回退逻辑
+### 7.8 排名回退逻辑（v0.2.0：共享积分 + 群昵称）
 
 ```python
 def get_ranking(group_id, top_n=10):
+    # 本群成员按全局积分排序（users × accounts JOIN）
     group_users = dao.get_top_n_by_group(group_id, top_n, min_points=1)
     if len(group_users) >= 3:
         return group_users  # 群排行
     # 本群不足 3 人，回退全局
     global_users = dao.get_top_n_global(top_n, min_points=1)
     return global_users  # 全局排行
+
+
+# 展示昵称：并发调 get_group_member_info 取 card → nickname → 回退 QQ
+# 全局榜每行附"最近活跃群"（users.updated_at 最大者）用于取昵称/展示
 ```
 
 ### 7.9 兑换核销（双向切换）
@@ -747,6 +791,27 @@ def format_fortune(qq, date_str, user_name) -> str:
     )
 ```
 
+### 7.14 改分唯一入口 change_balance（v0.2.0）
+
+所有积分变动（签到/抽奖/兑换/口令/管理加减分）必须经 `PointService.change_balance` 落账：
+
+```python
+@staticmethod
+async def change_balance(conn, qq, group_id, amount, reason, *,
+                         earned_amount=None, guard_balance=None,
+                         ref_id=None, admin_qq=None) -> int:
+    # 1. INSERT OR IGNORE accounts(qq) + users(qq, group_id)（自动建行）
+    # 2. UPDATE accounts SET points=points+?
+    #       [AND points>=guard_balance]（余额守卫，rowcount=0 抛 InsufficientPointsError）
+    #    total_earned += earned_amount（默认 amount，负向传 0，签到传 earned_inc）
+    # 3. SELECT points → balance
+    # 4. INSERT point_transactions（记录发生群 group_id 与全局 balance_after）
+    # 5. return balance
+```
+
+> `conn` 由调用方事务传入（与 `generate_record_no(conn)` 同一模式，不触碰 db.lock 重入）；
+> 由此消灭 5 处重复的"UPDATE points + SELECT + INSERT 流水" SQL 模式。
+
 ---
 
 ## 8. 后台定时任务
@@ -771,7 +836,7 @@ def format_fortune(qq, date_str, user_name) -> str:
 | 层级 | 措施 |
 |---|---|
 | 数据库 | WAL 模式（读写不互锁） |
-| 索引 | `(group_id, points DESC)` 加速排行；`(group_id, sign_date)` 加速签到查重；`(qq, group_id, created_at DESC)` 流水翻页 |
+| 索引 | `idx_accounts_points` 加速排行；`(group_id, sign_date)` 加速签到查重；`(qq, sign_date)` 全局限签去重；`(qq, group_id, created_at DESC)` 流水翻页 |
 | 查询 | 只查必要列（不用 `SELECT *`）；所有列表查询带 `LIMIT`；用 `COUNT` 而非取全行 |
 | 缓存 | 配置项和管理员列表启动时读入内存字典，写入时同步刷新 |
 | 冷却 | 限速全程内存操作（dict），不写 DB |

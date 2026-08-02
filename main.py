@@ -364,6 +364,11 @@ class PointSystemPlugin(Star):
         parts = msg.split(maxsplit=2)
         target = parts[1] if len(parts) >= 2 else None
         page = parts[2] if len(parts) >= 3 else "1"
+        # 中英别名归一化（全部→all / 未核销→pending，英文保留）
+        if target is not None:
+            from .handlers.admin import _RECORD_FILTER_ALIASES
+
+            target = _RECORD_FILTER_ALIASES.get(target, target)
         # 纯数字参数视为页码（与 /流水 语义一致），如 /兑换记录 2
         if target and target.isdigit():
             page = target
@@ -581,7 +586,11 @@ class PointSystemPlugin(Star):
         target_qq = qq
         page = 1
         if len(parts) >= 2:
-            if parts[1] == "all":
+            # 中英别名归一化（全部→all，英文保留）
+            from .handlers.admin import _RECORD_FILTER_ALIASES
+
+            p1 = _RECORD_FILTER_ALIASES.get(parts[1], parts[1])
+            if p1 == "all":
                 if not is_admin:
                     yield event.plain_result(
                         "\u4f60\u6ca1\u6709\u6743\u9650\u67e5\u770b\u4ed6\u4eba\u6d41\u6c34"
@@ -601,7 +610,7 @@ class PointSystemPlugin(Star):
                     page = max(1, int(parts[1]))
                 else:
                     yield event.plain_result(
-                        "\u53c2\u6570\u9519\u8bef: \u7528\u6cd5 / \u6d41\u6c34 [\u9875\u7801 | all | @\u7528\u6237] [\u9875\u7801]"
+                        "\u53c2\u6570\u9519\u8bef: \u7528\u6cd5 / \u6d41\u6c34 [\u9875\u7801 | all/\u5168\u90e8 | @\u7528\u6237] [\u9875\u7801]"
                     )
                     return
             if len(parts) >= 3 and parts[2].isdigit():

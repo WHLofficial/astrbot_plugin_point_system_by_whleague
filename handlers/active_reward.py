@@ -4,6 +4,7 @@ from astrbot.api import logger
 from astrbot.api.event import MessageChain
 
 from ..utils.keyword_matcher import is_lottery_message, is_signin_message
+from ..utils.security import clean_display_name
 
 
 class ActiveRewardHandler:
@@ -77,7 +78,7 @@ class ActiveRewardHandler:
 
             await event.send(
                 MessageChain().message(
-                    f"\U0001f389 \u606d\u559c\uff01{event.get_sender_name()}\u89e6\u53d1\u6d3b\u8dc3\u5956\u52b1 +{points} \u79ef\u5206"
+                    f"\U0001f389 \u606d\u559c\uff01{clean_display_name(event.get_sender_name())}\u89e6\u53d1\u6d3b\u8dc3\u5956\u52b1 +{points} \u79ef\u5206"
                 )
             )
 

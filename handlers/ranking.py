@@ -5,6 +5,7 @@ from astrbot.api import logger
 from astrbot.api.event import MessageEventResult
 
 from ..utils.group_info import fetch_member_info
+from ..utils.security import clean_display_name
 
 
 class RankingHandler:
@@ -27,7 +28,11 @@ class RankingHandler:
         async def _one(qq, gid):
             info = await fetch_member_info(bot, qq, gid)
             if info:
-                return info.get("card") or info.get("nickname") or qq
+                # 控制字符清洗防注入（与运势/查生日一致，card/nickname 均清洗）
+                name = clean_display_name(
+                    info.get("card") or info.get("nickname") or ""
+                )
+                return name or qq
             return qq
 
         try:

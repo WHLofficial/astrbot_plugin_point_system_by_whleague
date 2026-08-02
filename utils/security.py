@@ -2,6 +2,15 @@ import calendar
 import re
 
 _MAX_TEXT_LENGTH = 200
+_CTRL_RE = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def clean_display_name(raw) -> str:
+    """剥离控制字符（\\x00-\\x1f \\x7f）并去首尾空白，防止昵称构造多行伪造消息。
+
+    应用于所有将群昵称/发送者昵称拼入回复文案的位置（运势、排行、查生日、活跃奖励）。
+    """
+    return _CTRL_RE.sub("", str(raw or "")).strip()
 
 
 def sanitize_text(text: str) -> str:

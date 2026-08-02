@@ -1,6 +1,7 @@
 import random
-import re
 import zlib
+
+from .security import clean_display_name
 
 _LEVELS = [
     (
@@ -72,7 +73,7 @@ def get_fortune(qq: str, date_str: str) -> dict:
 def format_fortune(qq: str, date_str: str, user_name: str) -> str:
     f = get_fortune(qq, date_str)
     # 昵称可能含换行/控制字符，剥离后再拼入文案，防止构造多行伪造消息
-    clean_name = re.sub(r"[\x00-\x1f\x7f]", "", str(user_name or "")).strip()
+    clean_name = clean_display_name(user_name)
     return (
         "\u2501" * 20 + "\n"
         f"\U0001f4ae {clean_name} \u7684\u4eca\u65e5\u8fd0\u52bf\n"

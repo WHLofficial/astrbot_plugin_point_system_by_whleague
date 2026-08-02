@@ -3,7 +3,8 @@ from collections.abc import AsyncGenerator
 from astrbot.api import logger
 from astrbot.api.event import MessageEventResult
 
-from ..utils.security import parse_birthday
+from ..utils.group_info import fetch_member_info
+from ..utils.security import clean_display_name, parse_birthday
 
 
 class BirthdayHandler:
@@ -36,6 +37,7 @@ class BirthdayHandler:
     async def query_birthday(self, event) -> AsyncGenerator[MessageEventResult, None]:
         try:
             msg = event.get_message_str()
+            group_id = event.get_group_id()
             target_qq = event.get_sender_id()
 
             parts = msg.split()
@@ -47,10 +49,19 @@ class BirthdayHandler:
                     target_qq = parse_qq(parts[1])
 
             account = await self._plugin.dao.get_account(target_qq)
+            # 群昵称展示（card → nickname → QQ 回退），控制字符清洗防注入（同积分榜）
+            info = await fetch_member_info(
+                getattr(event, "bot", None), target_qq, group_id
+            )
+            name = clean_display_name(
+                (info or {}).get("card") or (info or {}).get("nickname") or ""
+            )
+            if not name:
+                name = target_qq
             if not account or not account["birthday"]:
-                yield event.plain_result(f"{target_qq} 还没有设置生日")
+                yield event.plain_result(f"{name} 还没有设置生日")
                 return
-            yield event.plain_result(f"{target_qq} 的生日是 {account['birthday']}")
+            yield event.plain_result(f"{name} 的生日是 {account['birthday']}")
         except Exception as e:
             logger.error(f"Query birthday error: {e}")
             yield event.plain_result(

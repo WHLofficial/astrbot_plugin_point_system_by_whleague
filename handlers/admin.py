@@ -10,6 +10,30 @@ from ..utils.security import parse_int, parse_qq, parse_qq_arg, sanitize_text
 
 _CLEAR_TOKEN_TTL = 300.0
 
+# /修改兑换 参数2（字段名）中英别名映射：中文仅保留一个，英文原词兼容
+_ITEM_FIELD_ALIASES = {
+    "cost": "cost",
+    "价格": "cost",
+    "stock": "stock",
+    "库存": "stock",
+    "discount_price": "discount_price",
+    "折扣价": "discount_price",
+    "discount_end_time": "discount_end_time",
+    "折扣时间": "discount_end_time",
+    "name": "name",
+    "名称": "name",
+    "description": "description",
+    "描述": "description",
+}
+
+# /兑换记录 与 /流水 目标参数中英别名映射（中文仅保留一个）
+_RECORD_FILTER_ALIASES = {
+    "all": "all",
+    "全部": "all",
+    "pending": "pending",
+    "未核销": "pending",
+}
+
 # 群清空范围对应的表（顺序即删除顺序，先删子表再删父表以通过外键约束）。
 # 群清空=清零本群成员的共享积分 + 删除群级记录，users（成员关系）与 accounts（身份）保留。
 _GROUP_CLEAR_TABLES = (
@@ -208,10 +232,12 @@ class AdminHandler:
             msg = event.get_message_str()
             parts = msg.split(maxsplit=3)
             if len(parts) < 4:
-                yield event.plain_result("用法: /修改兑换 <ID> <字段> <值>")
+                yield event.plain_result(
+                    "用法: /修改兑换 <ID> <字段: 价格/库存/折扣价/折扣时间/名称/描述> <值>"
+                )
                 return
             item_id = parse_int(parts[1], min_val=1)
-            field = parts[2]
+            field = _ITEM_FIELD_ALIASES.get(parts[2], parts[2])
             raw_value = parts[3]
             if field == "cost":
                 value = parse_int(raw_value, min_val=1)
@@ -231,10 +257,31 @@ class AdminHandler:
                 except ValueError:
                     raise ValueError("折扣截止时间需为 YYYY-MM-DD HH:MM 格式")
                 value = raw_value
-            else:
+            elif field == "name":
                 value = sanitize_text(raw_value)
+            elif field == "description":
+                value = sanitize_text(raw_value)
+            else:
+                yield event.plain_result(f"参数错误: 不支持字段 {parts[2]}")
+                return
             await self._plugin.dao.update_item_field(item_id, field, value)
-            yield event.plain_result(f"已修改物品 {item_id} 的 {field}")
+            item = await self._plugin.dao.get_item(item_id)
+            if not item:
+                yield event.plain_result(f"物品 {item_id} 不存在")
+                return
+            lines = [f"已修改物品 #{item_id}:"]
+            lines.append(f"  · 名称: {item['name']}")
+            if item["description"]:
+                lines.append(f"  · 描述: {item['description']}")
+            lines.append(f"  · 价格: {item['cost']} 积分")
+            stock_text = "∞ (无限)" if item["stock"] == -1 else str(item["stock"])
+            lines.append(f"  · 库存: {stock_text}")
+            if item["discount_price"] is not None:
+                end = item["discount_end_time"] or "无截止时间"
+                lines.append(f"  · 折扣价: {item['discount_price']} (截止 {end})")
+            status = "✅ 上架中" if item["is_active"] else "❌ 已下架"
+            lines.append(f"  · 状态: {status}")
+            yield event.plain_result("\n".join(lines))
         except (ValueError, IndexError) as e:
             yield event.plain_result(f"参数错误: {e}")
         except Exception as e:
@@ -265,11 +312,21 @@ class AdminHandler:
             points = parse_int(parts[2], min_val=1)
             group_id = event.get_group_id()
             admin_qq = event.get_sender_id()
+            # 覆盖警告：当日已有口令时提示将被覆盖（v0.2.2）
+            from ..utils.helpers import today_str
+
+            existing = await self._plugin.dao.get_daily_keyword(group_id, today_str())
             await self._plugin.dao.set_daily_keyword(
                 group_id, keyword, points, admin_qq
             )
             self._plugin.daily_keyword_service.invalidate(group_id)
-            yield event.plain_result(f'已设置今日口令: "{keyword}" 奖励 {points} 积分')
+            msg = f'已设置今日口令: "{keyword}" 奖励 {points} 积分'
+            if existing:
+                msg = (
+                    f'⚠️ 已覆盖今日原口令: "{existing["keyword"]}"'
+                    f"（奖励 {existing['points']} 积分）\n{msg}"
+                )
+            yield event.plain_result(msg)
         except (ValueError, IndexError) as e:
             yield event.plain_result(f"参数错误: {e}")
         except Exception as e:

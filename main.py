@@ -18,23 +18,20 @@ from .db.connection import DatabaseManager
 from .db.dao import PointDAO
 from .db.schema import init_schema
 from .utils.helpers import set_day_boundary, today_str
+from .utils.keyword_matcher import (
+    is_lottery_message,
+    is_ranking_message,
+    is_signin_message,
+)
 from .utils.rate_limiter import RateLimiter
 
-_PLUGIN_COMMANDS = frozenset({
-    "\u7b7e\u5230\u7edf\u8ba1", "\u5151\u6362", "\u5151\u6362\u8bb0\u5f55", "\u6838\u9500",
-    "\u6dfb\u52a0\u5151\u6362", "\u5220\u9664\u5151\u6362", "\u4fee\u6539\u5151\u6362",
-    "\u52a0\u5206", "\u6263\u5206", "\u8bbe\u7f6e\u4eca\u65e5\u53e3\u4ee4", "\u6e05\u9664\u4eca\u65e5\u53e3\u4ee4",
-    "\u8bbe\u7f6e", "\u67e5\u770b\u914d\u7f6e", "\u8bbe\u7f6e\u6298\u6263", "\u6e05\u9664\u6298\u6263",
-    "\u6dfb\u52a0\u7ba1\u7406", "\u5220\u9664\u7ba1\u7406", "\u6dfb\u52a0\u65e5\u671f\u5956\u52b1",
-    "\u5220\u9664\u65e5\u671f\u5956\u52b1", "\u67e5\u770b\u65e5\u671f\u5956\u52b1",
-    "\u8bbe\u7f6e\u751f\u65e5", "\u67e5\u751f\u65e5", "\u6d41\u6c34",
-    "\u6e05\u7a7a\u6570\u636e", "\u6e05\u7a7a\u5168\u90e8\u6570\u636e", "\u786e\u8ba4\u6e05\u7a7a",
-    "\u79ef\u5206\u7cfb\u7edf\u5e2e\u52a9", "\u6307\u4ee4\u56fe", "\u547d\u4ee4\u56fe", "\u5e2e\u52a9\u56fe",
-})
 
-
-@register("points_system", "WHLofficial",
-          "\u79ef\u5206\u7cfb\u7edf\u63d2\u4ef6\uff1a\u7b7e\u5230/\u62bd\u5956/\u5151\u6362/\u6392\u884c/\u751f\u65e5\u7b49", PLUGIN_VERSION)
+@register(
+    "points_system",
+    "WHLofficial",
+    "\u79ef\u5206\u7cfb\u7edf\u63d2\u4ef6\uff1a\u7b7e\u5230/\u62bd\u5956/\u5151\u6362/\u6392\u884c/\u751f\u65e5\u7b49",
+    PLUGIN_VERSION,
+)
 class PointSystemPlugin(Star):
     def __init__(self, context: Context, config: dict | None = None):
         super().__init__(context)
@@ -281,42 +278,71 @@ class PointSystemPlugin(Star):
     # ═══════════════════════════════════════════════════════════
 
     @filter.regex(r"(?:\u7b7e\u5230|\u6253\u5361|(?i:\bsign\b))")
-    async def on_sign_in(self, event: AstrMessageEvent) -> AsyncGenerator[MessageEventResult, None]:
-        if event.is_at_or_wake_command:
-            msg = event.get_message_str()
-            for cmd in _PLUGIN_COMMANDS:
-                if msg == cmd or msg.startswith(cmd + " "):
-                    return
+    async def on_sign_in(
+        self, event: AstrMessageEvent
+    ) -> AsyncGenerator[MessageEventResult, None]:
+        # 严格匹配触发（v0.2.1）：消息必须完全等于签到关键词，普通聊天含"签到"字样不拦截
+        if not is_signin_message(
+            event.get_message_str(), self.config_cache.get("keyword_sign", [])
+        ):
+            return
+        produced = False
         async for result in self.sign_in_handler.handle(event):
+            produced = True
             yield result
-        event.stop_event()
+        if produced:
+            event.stop_event()
 
     # ═══════════════════════════════════════════════════════════
     # Handlers: Lottery
     # ═══════════════════════════════════════════════════════════
 
     @filter.regex(r"(?:\u62bd\u5956|(?i:\blottery\b))")
-    async def on_lottery(self, event: AstrMessageEvent) -> AsyncGenerator[MessageEventResult, None]:
+    async def on_lottery(
+        self, event: AstrMessageEvent
+    ) -> AsyncGenerator[MessageEventResult, None]:
+        # 严格匹配触发：消息等于 抽奖关键词 / 口令+关键词 / 关键词+口令
+        msg = event.get_message_str()
+        cfg = self.config_cache
+        if not is_lottery_message(
+            msg,
+            cfg.get("lottery_passphrase", ""),
+            cfg.get("keyword_lottery", []),
+        ):
+            return
+        produced = False
         async for result in self.lottery_handler.handle(event):
+            produced = True
             yield result
-        event.stop_event()
+        if produced:
+            event.stop_event()
 
     # ═══════════════════════════════════════════════════════════
     # Handlers: Ranking
     # ═══════════════════════════════════════════════════════════
 
     @filter.regex(r"\u6392\u884c|\u6392\u540d|\u79ef\u5206\u699c")
-    async def on_ranking(self, event: AstrMessageEvent) -> AsyncGenerator[MessageEventResult, None]:
+    async def on_ranking(
+        self, event: AstrMessageEvent
+    ) -> AsyncGenerator[MessageEventResult, None]:
+        # 严格匹配触发：消息必须完全等于 排行/排名/积分榜
+        if not is_ranking_message(event.get_message_str()):
+            return
+        produced = False
         async for result in self.ranking_handler.handle(event):
+            produced = True
             yield result
-        event.stop_event()
+        if produced:
+            event.stop_event()
 
     # ═══════════════════════════════════════════════════════════
     # Handlers: Redeem (command)
     # ═══════════════════════════════════════════════════════════
 
     @filter.command("\u5151\u6362")
-    async def cmd_redeem(self, event: AstrMessageEvent) -> AsyncGenerator[MessageEventResult, None]:
+    async def cmd_redeem(
+        self, event: AstrMessageEvent
+    ) -> AsyncGenerator[MessageEventResult, None]:
         msg = event.get_message_str()
         parts = msg.split()
         if len(parts) == 1:

@@ -256,10 +256,18 @@ class AdminHandler:
             if not keyword:
                 yield event.plain_result("关键词不能为空")
                 return
+            # 保留字校验（v0.2.1）：口令关键词不得与签到/抽奖/排行触发词冲突，
+            # 含「口令±触发词」组合形态（否则该形态消息会被触发词拦截，口令永远领不到）
+            blocked = self._reserved_keyword_reason(keyword)
+            if blocked:
+                yield event.plain_result(blocked)
+                return
             points = parse_int(parts[2], min_val=1)
             group_id = event.get_group_id()
             admin_qq = event.get_sender_id()
-            await self._plugin.dao.set_daily_keyword(group_id, keyword, points, admin_qq)
+            await self._plugin.dao.set_daily_keyword(
+                group_id, keyword, points, admin_qq
+            )
             self._plugin.daily_keyword_service.invalidate(group_id)
             yield event.plain_result(f'已设置今日口令: "{keyword}" 奖励 {points} 积分')
         except (ValueError, IndexError) as e:
@@ -267,6 +275,33 @@ class AdminHandler:
         except Exception as e:
             logger.error(f"Set daily keyword error: {e}")
             yield event.plain_result("操作失败")
+
+    def _reserved_keyword_reason(self, keyword: str) -> str | None:
+        """判断口令关键词是否与触发词冲突（保留字），冲突返回提示文案。
+
+        触发词 = keyword_sign ∪ keyword_lottery ∪ 排行关键词。
+        冲突形态（压缩空白、大小写不敏感比较）：
+          1. 关键词本身就是触发词
+          2. 口令 + 触发词（如 "whl抽奖"）
+          3. 触发词 + 口令（如 "抽奖whl"）
+        """
+        cfg = self._plugin.config_cache
+        reserved = set(cfg.get("keyword_sign", []))
+        reserved |= set(cfg.get("keyword_lottery", []))
+        reserved |= {"排行", "排名", "积分榜"}
+        passphrase = str(cfg.get("lottery_passphrase", "") or "")
+
+        norm = lambda s: "".join(s.split()).lower()  # noqa: E731
+        norm_k = norm(keyword)
+        if any(norm_k == norm(t) for t in reserved):
+            return "口令不能与签到/抽奖/排行触发词相同"
+        if passphrase:
+            p_n = norm(passphrase)
+            for t in reserved:
+                t_n = norm(t)
+                if norm_k == p_n + t_n or norm_k == t_n + p_n:
+                    return "口令不能与触发词构成「口令+触发词」组合（会被触发判定拦截）"
+        return None
 
     async def clear_daily_kw(self, event) -> AsyncGenerator[MessageEventResult, None]:
         if not await self._require_admin(event):

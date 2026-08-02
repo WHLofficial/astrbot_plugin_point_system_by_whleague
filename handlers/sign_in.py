@@ -1,7 +1,7 @@
 from collections.abc import AsyncGenerator
+
 from astrbot.api import logger
 from astrbot.api.event import MessageEventResult
-from ..utils.keyword_matcher import is_signin_message
 
 
 class SignInHandler:
@@ -19,7 +19,10 @@ class SignInHandler:
             msg = event.get_message_str()
 
             result = await self._plugin.sign_in_service.sign_in(
-                qq, group_id, platform, msg,
+                qq,
+                group_id,
+                platform,
+                msg,
                 bot=getattr(event, "bot", None),
                 user_name=event.get_sender_name(),
             )
@@ -30,4 +33,6 @@ class SignInHandler:
             yield event.plain_result(result["msg"])
         except Exception as e:
             logger.error(f"Sign-in error for {event.get_sender_id()}: {e}")
-            yield event.plain_result("\u7b7e\u5230\u5931\u8d25\uff0c\u5df2\u8bb0\u5f55\u9519\u8bef")
+            yield event.plain_result(
+                "\u7b7e\u5230\u5931\u8d25\uff0c\u5df2\u8bb0\u5f55\u9519\u8bef"
+            )

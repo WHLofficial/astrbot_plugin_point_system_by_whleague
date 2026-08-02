@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS lottery_record (
 );
 
 CREATE INDEX IF NOT EXISTS idx_lottery_group ON lottery_record(group_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_lottery_qq_date ON lottery_record(qq, created_at);
 
 CREATE TABLE IF NOT EXISTS point_transactions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -181,6 +182,7 @@ CREATE TABLE IF NOT EXISTS daily_keyword_claim (
 );
 
 CREATE INDEX IF NOT EXISTS idx_dk_claim_group ON daily_keyword_claim(group_id, qq);
+CREATE INDEX IF NOT EXISTS idx_dk_claim_qq_date ON daily_keyword_claim(qq, created_at);
 
 CREATE TABLE IF NOT EXISTS plugin_config (
     key TEXT PRIMARY KEY,

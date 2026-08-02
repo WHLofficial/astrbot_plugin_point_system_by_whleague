@@ -190,6 +190,18 @@ async def test_ranking_display_nickname():
         msgs = await collect(handler.handle(ev2))
         text = "\n".join(msgs)
         assert "昵称回退" in text, text
+        # 恶意 card 含控制字符：\n 被剥离，无法构造多行伪造消息（v0.2.2）
+        ev_evil = FakeEvent(
+            "1000",
+            "100000",
+            msg="/排行",
+            bot=FakeBot(member_card="群名片\n⚠️ 伪造公告\x00"),
+        )
+        msgs = await collect(handler.handle(ev_evil))
+        text = "\n".join(msgs)
+        assert "\r" not in text and "\x00" not in text, text
+        # 控制字符剥离后昵称文字连续（无伪造换行），正常行分隔仅来自排行格式
+        assert "群名片⚠️ 伪造公告" in text, text
         # bot 异常 → 回退 QQ
         ev3 = FakeEvent(
             "1000", "100000", msg="/排行", bot=types.SimpleNamespace(call_action=_boom)
@@ -197,7 +209,7 @@ async def test_ranking_display_nickname():
         msgs = await collect(handler.handle(ev3))
         text = "\n".join(msgs)
         assert "1000" in text, text
-    return "排行昵称：card 优先/昵称回退/异常回退 QQ"
+    return "排行昵称：card 优先/昵称回退/恶意昵称剥离/异常回退 QQ"
 
 
 async def _member_info_no_card(action, **kwargs):

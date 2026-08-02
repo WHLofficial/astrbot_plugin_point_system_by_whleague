@@ -151,7 +151,41 @@ async def test_admin_item_crud():
         ev = FakeEvent("admin", "G1", is_admin=True, msg="/修改兑换 2 points 5")
         msgs = await collect(handler.modify_item(ev))
         assert any("参数错误" in m for m in msgs)
-    return "管理：商品添加/删除/修改全字段与校验"
+        # v0.2.2：中文别名 + 反馈全字段
+        ev = FakeEvent("admin", "G1", is_admin=True, msg="/修改兑换 2 价格 40")
+        msgs = await collect(handler.modify_item(ev))
+        assert (await t.dao.get_item(2))["cost"] == 40
+        text = "\n".join(msgs)
+        assert "已修改物品 #2" in text and "名称: 新名字" in text, msgs
+        assert "价格: 40 积分" in text and "库存: 0" in text, msgs
+        assert "上架中" in text, msgs
+        ev = FakeEvent("admin", "G1", is_admin=True, msg="/修改兑换 2 库存 7")
+        await collect(handler.modify_item(ev))
+        assert (await t.dao.get_item(2))["stock"] == 7
+        ev = FakeEvent("admin", "G1", is_admin=True, msg="/修改兑换 2 名称 中文名")
+        await collect(handler.modify_item(ev))
+        assert (await t.dao.get_item(2))["name"] == "中文名"
+        ev = FakeEvent("admin", "G1", is_admin=True, msg="/修改兑换 2 折扣价 20")
+        msgs = await collect(handler.modify_item(ev))
+        assert (await t.dao.get_item(2))["discount_price"] == 20
+        assert any("折扣价: 20" in m for m in msgs)
+        ev = FakeEvent("admin", "G1", is_admin=True, msg="/修改兑换 2 折扣时间 2026-12-31 23:59")
+        msgs = await collect(handler.modify_item(ev))
+        assert not any("参数错误" in m for m in msgs)
+        assert any("折扣价: 20" in m and "2026-12-31 23:59" in m for m in msgs)
+        ev = FakeEvent("admin", "G1", is_admin=True, msg="/修改兑换 2 描述 好东西")
+        await collect(handler.modify_item(ev))
+        assert (await t.dao.get_item(2))["description"] == "好东西"
+        # 库存 -1（无限）反馈显示 ∞
+        ev = FakeEvent("admin", "G1", is_admin=True, msg="/修改兑换 2 库存 -1")
+        msgs = await collect(handler.modify_item(ev))
+        assert (await t.dao.get_item(2))["stock"] == -1
+        assert any("∞" in m for m in msgs), msgs
+        # 非法中文/未知字段
+        ev = FakeEvent("admin", "G1", is_admin=True, msg="/修改兑换 2 瞎改 5")
+        msgs = await collect(handler.modify_item(ev))
+        assert any("不支持字段" in m for m in msgs)
+    return "管理：商品添加/删除/修改全字段与校验（含中文别名）"
 
 
 async def test_admin_daily_kw_reserved():
@@ -182,12 +216,16 @@ async def test_admin_daily_keyword():
         ev = FakeEvent("admin", "G1", is_admin=True, msg="/设置今日口令 红包 10")
         msgs = await collect(handler.set_daily_kw(ev))
         assert any("红包" in m and "10" in m for m in msgs)
+        assert not any("已覆盖" in m for m in msgs), msgs  # 首次设置无覆盖警告
         kw = await t.dao.get_daily_keyword("G1", handler._plugin.dao._today_str())
         assert kw["keyword"] == "红包" and kw["points"] == 10
         assert invalidated == ["G1"]
-        # 二次设置（upsert）
+        # 二次设置（upsert）+ v0.2.2 覆盖警告
         ev = FakeEvent("admin", "G1", is_admin=True, msg="/设置今日口令 新口令 20")
-        await collect(handler.set_daily_kw(ev))
+        msgs = await collect(handler.set_daily_kw(ev))
+        text = "\n".join(msgs)
+        assert "已覆盖今日原口令" in text and '"红包"' in text, msgs
+        assert "已设置今日口令: \"新口令\" 奖励 20 积分" in text, msgs
         kw = await t.dao.get_daily_keyword("G1", handler._plugin.dao._today_str())
         assert kw["keyword"] == "新口令" and kw["points"] == 20
         # 非法参数（无关键词）
@@ -202,7 +240,27 @@ async def test_admin_daily_keyword():
             is None
         )
         assert len(invalidated) == 3  # 设置×2 + 清除×1
-    return "管理：口令设置/upsert/空关键词/清除+缓存失效"
+    return "管理：口令设置/upsert/覆盖警告/空关键词/清除+缓存失效"
+
+
+async def test_admin_daily_kw_passphrase_dynamic():
+    """口令变更后保留字校验动态跟随（v0.2.2）：新口令±触发词被拦，旧口令放行。"""
+    async with TempDB() as t:
+        handler, _ = await _admin_plugin(t)
+        # 口令改为 喵喵
+        handler._plugin.config_cache["lottery_passphrase"] = "喵喵"
+        for kw in ("喵喵签到", "签到喵喵", "喵喵抽奖", "抽奖喵喵"):
+            ev = FakeEvent("admin", "G1", is_admin=True, msg=f"/设置今日口令 {kw} 10")
+            msgs = await collect(handler.set_daily_kw(ev))
+            assert any("口令" in m and "触发词" in m for m in msgs), (kw, msgs)
+            assert await t.count("daily_keyword") == 0, kw
+        # 旧口令 whl 形态不再被拦（whl 已非当前口令）
+        for kw in ("whl抽奖", "抽奖whl"):
+            ev = FakeEvent("admin", "G1", is_admin=True, msg=f"/设置今日口令 {kw} 10")
+            msgs = await collect(handler.set_daily_kw(ev))
+            assert any("已设置今日口令" in m for m in msgs), (kw, msgs)
+        await t.dao.clear_daily_keyword("G1")
+    return "口令保留字：口令配置变更后拦截/放行形态动态跟随"
 
 
 async def test_admin_set_config():
@@ -250,7 +308,22 @@ async def test_admin_set_config():
         )
         msgs = await collect(handler.set_config(ev))
         assert any("参数错误" in m for m in msgs)
-    return "管理：/设置 各类型/交叉校验/落库/非法值"
+        # lottery_tiers 经 handler 设置（合法 JSON 通过、非法拒绝）
+        ok_tiers = '{"tiers":[{"label":"特等奖","weight":1,"points_min":1,"points_max":10,"emoji":"👑"}]}'
+        ev = FakeEvent(
+            "admin", "G1", is_admin=True, msg=f"/设置 lottery_tiers {ok_tiers}"
+        )
+        msgs = await collect(handler.set_config(ev))
+        assert not any("参数错误" in m for m in msgs), msgs
+        assert handler._plugin.config_cache["lottery_tiers"] == ok_tiers
+        bad_tiers = '{"tiers":[{"label":"x","weight":NaN,"points_min":1,"points_max":10}]}'
+        ev = FakeEvent(
+            "admin", "G1", is_admin=True, msg=f"/设置 lottery_tiers {bad_tiers}"
+        )
+        msgs = await collect(handler.set_config(ev))
+        assert any("参数错误" in m for m in msgs)
+        assert handler._plugin.config_cache["lottery_tiers"] == ok_tiers  # 未生效
+    return "管理：/设置 各类型/交叉校验/落库/非法值/lottery_tiers"
 
 
 async def test_admin_set_config_webui_path():
@@ -491,6 +564,7 @@ TESTS = [
     ("admin_item_crud", test_admin_item_crud),
     ("admin_daily_keyword", test_admin_daily_keyword),
     ("admin_daily_kw_reserved", test_admin_daily_kw_reserved),
+    ("admin_daily_kw_passphrase_dynamic", test_admin_daily_kw_passphrase_dynamic),
     ("admin_set_config", test_admin_set_config),
     ("admin_set_config_webui", test_admin_set_config_webui_path),
     ("admin_set_config_hot_reload", test_admin_set_config_hot_reload),

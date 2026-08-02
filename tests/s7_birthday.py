@@ -3,7 +3,7 @@
 import json
 import types
 
-from .common import FakeEvent, TempDB, base_cfg, collect
+from .common import FakeBot, FakeEvent, TempDB, base_cfg, collect
 
 
 async def test_birthday_set_and_query():
@@ -21,25 +21,42 @@ async def test_birthday_set_and_query():
             assert any("已设置生日为 12-25" in m for m in msgs)
         row = await t.dao.get_account("u1")
         assert row["birthday"] == "12-25"
-        # 查询自己
+        # 查询自己（无 bot：回退 QQ）
         ev = FakeEvent("u1", "G1", msg="/查生日")
         msgs = await collect(handler.query_birthday(ev))
-        assert any("12-25" in m for m in msgs)
-        # 查询他人（@QQ 形式）
+        assert any("12-25" in m and "u1" in m for m in msgs)
+        # 查询他人（@QQ 形式 + FakeBot 群名片，群 ID 须为数字供 int() 转换）
         await t.db.execute(
             "INSERT INTO accounts (qq, birthday) VALUES ('10002','02-29')"
         )
         await t.db.execute(
-            "INSERT INTO users (qq, group_id) VALUES ('10002','G1')"
+            "INSERT INTO users (qq, group_id) VALUES ('10002','100001')"
         )
-        ev = FakeEvent("u1", "G1", msg="/查生日 @10002")
+        ev = FakeEvent("u1", "100001", msg="/查生日 @10002", bot=FakeBot(member_card="群名片X"))
+        msgs = await collect(handler.query_birthday(ev))
+        assert any("群名片X" in m and "02-29" in m for m in msgs), msgs
+        # 恶意群名片含控制字符：\n 被剥离，无法构造多行伪造消息
+        ev = FakeEvent(
+            "u1", "100001", msg="/查生日 @10002", bot=FakeBot(member_card="卡片\n伪造行\x00")
+        )
+        msgs = await collect(handler.query_birthday(ev))
+        text = "\n".join(msgs)
+        assert "\r" not in text and "\x00" not in text, text
+        assert "\n" not in text, text  # 控制字符剥离后无新增换行
+        assert "02-29" in text, text
+        # 无 bot（call_action 缺失）回退 QQ
+        ev = FakeEvent("u1", "100001", msg="/查生日 @10002")
         msgs = await collect(handler.query_birthday(ev))
         assert any("10002" in m and "02-29" in m for m in msgs)
+        # 私聊（group_id=None）：昵称获取静默失败回退 QQ，仍可查询
+        ev = FakeEvent("u1", None, msg="/查生日")
+        msgs = await collect(handler.query_birthday(ev))
+        assert any("u1" in m and "12-25" in m for m in msgs)
         # 闰日合法（2000 年为闰年）
         ev = FakeEvent("u3", "G1", msg="/设置生日 2月29日")
         msgs = await collect(handler.set_birthday(ev))
         assert any("02-29" in m for m in msgs)
-    return "生日设置：两种格式/查询自己与他人/闰日合法"
+    return "生日设置：两种格式/查询自己与他人（群昵称+防注入）/闰日合法"
 
 
 async def test_birthday_invalid_inputs():

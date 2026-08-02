@@ -27,12 +27,8 @@ _INJECT_PAYLOADS = [
 
 async def test_sql_injection_fuzz():
     async with TempDB() as t:
-        await t.db.execute(
-            "INSERT INTO accounts (qq, points) VALUES ('victim',10)"
-        )
-        await t.db.execute(
-            "INSERT INTO users (qq, group_id) VALUES ('victim','G1')"
-        )
+        await t.db.execute("INSERT INTO accounts (qq, points) VALUES ('victim',10)")
+        await t.db.execute("INSERT INTO users (qq, group_id) VALUES ('victim','G1')")
         before_users = await t.count("users")
 
         for i, payload in enumerate(_INJECT_PAYLOADS):
@@ -166,7 +162,10 @@ async def test_permission_matrix():
 
         cases = [
             (handler.adjust_points, ("加分",)),
+            (handler.adjust_points, ("扣分",)),
             (handler.add_item, ()),
+            (handler.delete_item, ()),
+            (handler.modify_item, ()),
             (handler.set_daily_kw, ()),
             (handler.clear_daily_kw, ()),
             (handler.set_config, ()),
@@ -195,7 +194,7 @@ async def test_permission_matrix():
         # 全局管理员可执行一切
         msgs = await collect(handler.add_admin(global_admin))
         assert not any("没有权限" in m for m in msgs), msgs
-    return "权限矩阵：12 个群级操作 + 3 个提权操作 × 角色边界正确"
+    return "权限矩阵：15 个群级操作 + 3 个提权操作 × 角色边界正确"
 
 
 async def test_cross_group_isolation():
@@ -255,12 +254,8 @@ async def test_clear_token_security():
             point_service=_t.SimpleNamespace(_set_group_card=_noop),
         )
         handler = AdminHandler(plugin)
-        await t.db.execute(
-            "INSERT INTO accounts (qq, points) VALUES ('u1',1)"
-        )
-        await t.db.execute(
-            "INSERT INTO users (qq, group_id) VALUES ('u1','G1')"
-        )
+        await t.db.execute("INSERT INTO accounts (qq, points) VALUES ('u1',1)")
+        await t.db.execute("INSERT INTO users (qq, group_id) VALUES ('u1','G1')")
 
         ev = FakeEvent("admin", "G1", is_admin=True)
         await collect(handler.clear_data(ev, "group"))

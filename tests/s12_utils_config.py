@@ -1,5 +1,6 @@
 """S12 工具函数与配置解析边界：parse_keyword_list、业务日分界、today/period 一致性、跨年区间、兑换编号、安全解析、运势文案。"""
 
+import types
 from datetime import datetime, timedelta
 
 from .common import TempDB, restore_day_boundary, snapshot_day_boundary
@@ -178,6 +179,52 @@ async def test_fortune_format():
     return "运势：字段结构/文案包含姓名/等级/建议/幸运数字/控制字符剥离"
 
 
+async def test_clean_display_name():
+    from astrbot_plugin_point_system_by_whleague.utils.security import (
+        clean_display_name,
+    )
+
+    assert clean_display_name("正常昵称") == "正常昵称"
+    assert clean_display_name(" 带空格 ") == "带空格"
+    assert clean_display_name("恶意\r\n伪造\x00") == "恶意伪造"
+    assert clean_display_name("a\x1fb") == "ab"
+    assert clean_display_name("") == ""
+    assert clean_display_name(None) == ""
+    assert clean_display_name("tab\t分隔") == "tab分隔"
+    return "clean_display_name：正常/空白/控制字符/空值/None"
+
+
+async def test_fetch_member_info():
+    from astrbot_plugin_point_system_by_whleague.utils.group_info import (
+        fetch_member_info,
+    )
+
+    async def _mk(result, raise_err=False):
+        async def call_action(action, **kwargs):
+            if raise_err:
+                raise RuntimeError("boom")
+            return result
+
+        return types.SimpleNamespace(call_action=call_action)
+
+    # 无 bot → None
+    assert await fetch_member_info(None, "10001", "100000") is None
+    # 无 call_action → None
+    assert await fetch_member_info(object(), "10001", "100000") is None
+    # 正常 dict
+    bot = await _mk({"card": "名片", "nickname": "昵称"})
+    info = await fetch_member_info(bot, "10001", "100000")
+    assert info and info["card"] == "名片"
+    # 非 dict 返回（列表/字符串）→ None
+    for bad in ([1, 2], "str", 42):
+        bot2 = await _mk(bad)
+        assert await fetch_member_info(bot2, "10001", "100000") is None, bad
+    # 调用异常 → None（静默回退）
+    bot3 = await _mk(None, raise_err=True)
+    assert await fetch_member_info(bot3, "10001", "100000") is None
+    return "fetch_member_info：无bot/无call_action/正常/非dict/异常"
+
+
 def today_nodash() -> str:
     from astrbot_plugin_point_system_by_whleague.utils.helpers import today_str
 
@@ -231,5 +278,7 @@ TESTS = [
     ("generate_record_no", test_generate_record_no),
     ("security_parsers", test_security_parsers),
     ("fortune_format", test_fortune_format),
+    ("clean_display_name", test_clean_display_name),
+    ("fetch_member_info", test_fetch_member_info),
     ("keyword_matcher_strict", test_keyword_matcher_strict),
 ]

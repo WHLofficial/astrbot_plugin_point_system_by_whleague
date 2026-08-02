@@ -1,6 +1,7 @@
 """S10 用户侧 Handler 层 + /流水 + main 路由（wake 跳过、cmd_redeem 路由、cron 注册）。"""
 
 import types
+from unittest import mock
 
 from .common import FakeContext, FakeEvent, TempDB, base_cfg, collect
 
@@ -244,13 +245,16 @@ async def test_redeem_handler_items():
         # 兑换参数错误
         msgs = await collect(handler.do_redeem(FakeEvent("u1", "G1"), "0"))
         assert any("below minimum" in m for m in msgs)
+        # 数量超上限 999 被拒
+        msgs = await collect(handler.do_redeem(FakeEvent("u1", "G1"), "1", "1000"))
+        assert any("exceeds maximum" in m for m in msgs)
         # 物品不存在
         msgs = await collect(handler.do_redeem(FakeEvent("u1", "G1"), "999"))
         assert any("物品不存在或已下架" in m for m in msgs)
         # 非群聊
         msgs = await collect(handler.do_redeem(FakeEvent("u1", None), "1"))
         assert any("仅支持群聊" in m for m in msgs)
-    return "兑换 handler：列表/折扣/∞库存/参数错误/不存在"
+    return "兑换 handler：列表/折扣/∞库存/参数错误/数量上限/不存在"
 
 
 async def test_redeem_handler_records():
@@ -280,6 +284,15 @@ async def test_redeem_handler_records():
         # 自己的列表（普通用户）
         msgs = await collect(handler.list_records(FakeEvent("u1", "G1"), None, "1"))
         assert any("R20260101-0001" in m for m in msgs)
+        # 普通成员查 all/pending：不越权，仅落回自己的列表（无他人记录）
+        msgs = await collect(handler.list_records(FakeEvent("u1", "G1"), "all", "1"))
+        text = "\n".join(msgs)
+        assert "R20260101-0001" in text and "R20260101-0002" not in text, text
+        msgs = await collect(
+            handler.list_records(FakeEvent("u1", "G1"), "pending", "1")
+        )
+        assert any("R20260101-0001" in m for m in msgs)
+        assert not any("R20260101-0002" in m for m in msgs)
         # 核销：普通成员拒绝
         msgs = await collect(
             handler.toggle_verify(FakeEvent("u1", "G1"), "R20260101-0001", "")
@@ -325,6 +338,11 @@ async def test_transactions_command():
             obj.cmd_transactions(FakeEvent("u1", "G1", msg="/流水 all"))
         )
         assert any("没有权限" in m for m in msgs)
+        # 中文别名 全部 → all（成员仍被拒）
+        msgs = await collect(
+            obj.cmd_transactions(FakeEvent("u1", "G1", msg="/流水 全部"))
+        )
+        assert any("没有权限" in m for m in msgs)
         # 成员查他人被拒
         msgs = await collect(
             obj.cmd_transactions(FakeEvent("u1", "G1", msg="/流水 @10002"))
@@ -337,12 +355,23 @@ async def test_transactions_command():
             )
         )
         assert len(msgs) == 1 and "第1页" in msgs[0]
+        # 全局管理员查 全部（中文别名）
+        msgs = await collect(
+            obj.cmd_transactions(
+                FakeEvent("root", "G1", is_admin=True, msg="/流水 全部 2")
+            )
+        )
+        assert len(msgs) == 1 and "第2页" in msgs[0]
         # 参数错误
         msgs = await collect(
             obj.cmd_transactions(FakeEvent("u1", "G1", msg="/流水 abc"))
         )
         assert any("参数错误" in m for m in msgs)
-    return "/流水：自己/翻页/all 权限/他人权限/参数错误"
+        # 私聊（group_id=None）：仅查自己、不越权
+        msgs = await collect(obj.cmd_transactions(FakeEvent("u1", None, msg="/流水")))
+        assert len(msgs) == 1 and "积分流水" in msgs[0], msgs
+        assert not any("u2" in m for m in msgs)
+    return "/流水：自己/翻页/all|全部 权限/他人权限/参数错误/私聊"
 
 
 async def test_main_routes():
@@ -399,15 +428,21 @@ async def test_main_routes():
             ("redeem", "1", "1"),
             ("redeem", "1", "2"),
         ]
-        # cmd_redeem_records：纯数字视为页码，all/pending/R 前缀保持原语义
+        # cmd_redeem_records：纯数字视为页码，all/pending/R 前缀保持原语义，中文别名归一化
         await collect(obj.cmd_redeem_records(FakeEvent("u1", "G1", msg="/兑换记录 2")))
         await collect(obj.cmd_redeem_records(FakeEvent("u1", "G1", msg="/兑换记录 all 3")))
+        await collect(obj.cmd_redeem_records(FakeEvent("u1", "G1", msg="/兑换记录 全部")))
+        await collect(
+            obj.cmd_redeem_records(FakeEvent("u1", "G1", msg="/兑换记录 未核销 2"))
+        )
         await collect(
             obj.cmd_redeem_records(FakeEvent("u1", "G1", msg="/兑换记录 R20260101-0001"))
         )
-        assert obj.redeem_handler.calls[-3:] == [
+        assert obj.redeem_handler.calls[-5:] == [
             ("records", None, "2"),
             ("records", "all", "3"),
+            ("records", "all", "1"),
+            ("records", "pending", "2"),
             ("records", "R20260101-0001", "1"),
         ]
         # _start_cron_jobs：备份+生日两个任务
@@ -490,7 +525,76 @@ async def test_main_routes():
         ev2 = _StopRecorder("u1", "G1", msg="排行")
         await collect(obj.on_ranking(ev2))
         assert ev2.stopped == 1
-    return "main 路由：wake 跳过/兑换参数路由/兑换记录页码/cron 注册与重建/stop_event"
+        # cmd_verify：无参数 → 用法提示；有参数 → 委托 toggle_verify
+        class _VerifyRecorder:
+            def __init__(self):
+                self.calls = []
+
+            async def toggle_verify(self, event, record_no, note=""):
+                self.calls.append((record_no, note))
+                yield event.plain_result(f"核销 {record_no} {note}")
+
+        obj.redeem_handler = _VerifyRecorder()
+        msgs = await collect(obj.cmd_verify(FakeEvent("u1", "G1", msg="/核销")))
+        assert any("用法" in m for m in msgs)
+        assert obj.redeem_handler.calls == []
+        msgs = await collect(
+            obj.cmd_verify(FakeEvent("u1", "G1", msg="/核销 R20260101-0001 已发货"))
+        )
+        assert msgs == ["核销 R20260101-0001 已发货"]
+        assert obj.redeem_handler.calls == [("R20260101-0001", "已发货")]
+        # on_group_message 委托 active_reward_handler
+        class _ActiveRecorder:
+            def __init__(self):
+                self.calls = []
+
+            async def handle(self, event):
+                self.calls.append(event)
+                return None
+
+        obj.active_reward_handler = _ActiveRecorder()
+        ev3 = FakeEvent("u1", "G1", msg="普通群消息")
+        await obj.on_group_message(ev3)
+        assert obj.active_reward_handler.calls == [ev3]
+        # _cron_backup 委托 backup_service.run_backup
+        class _BackupRecorder:
+            def __init__(self):
+                self.calls = 0
+
+            async def run_backup(self):
+                self.calls += 1
+
+        obj.backup_service = _BackupRecorder()
+        await obj._cron_backup()
+        assert obj.backup_service.calls == 1
+        # terminate：移除 cron 任务 + 取消 sweep 任务 + 关闭 db
+        import asyncio as _asyncio
+
+        class _SweepTask:
+            def __init__(self):
+                self.cancelled = 0
+
+            def cancel(self):
+                self.cancelled += 1
+
+            def __await__(self):
+                return _asyncio.sleep(0).__await__()
+
+        removed = []
+        sweep = _SweepTask()
+        obj._cache_sweep_task = sweep
+        obj._backup_job = types.SimpleNamespace(
+            name="points_backup", remove=lambda: removed.append("backup")
+        )
+        obj._birthday_job = types.SimpleNamespace(
+            name="birthday_announce", remove=lambda: removed.append("birthday")
+        )
+        obj.db = types.SimpleNamespace(close=mock.AsyncMock())
+        await obj.terminate()
+        assert sweep.cancelled == 1, sweep.cancelled
+        assert set(removed) == {"backup", "birthday"}, removed
+        assert obj.db.close.called
+    return "main 路由：wake 跳过/兑换参数路由/兑换记录页码/cron 注册与重建/stop_event/核销委托/群消息委托/备份回调/terminate"
 
 
 TESTS = [

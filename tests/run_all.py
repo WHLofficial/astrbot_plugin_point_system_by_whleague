@@ -14,11 +14,14 @@ import importlib
 import sys
 import time
 
-try:
-    sys.stdout.reconfigure(encoding="utf-8")
-    sys.stderr.reconfigure(encoding="utf-8")
-except Exception:
-    pass
+# Windows 终端默认 GBK 代码页：交互式终端保持系统编码（中文正常显示），
+# 仅当输出被重定向/管道（非 TTY）时统一为 UTF-8，避免乱码。
+for stream in (sys.stdout, sys.stderr):
+    try:
+        if not stream.isatty():
+            stream.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
 
 TIMEOUT = 300  # 单测试超时秒数（防挂死）
 

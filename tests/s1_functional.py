@@ -2,7 +2,7 @@
 
 import json
 
-from .common import FakeEvent, TempDB, collect
+from .common import FakeBot, FakeEvent, TempDB, base_cfg, collect
 
 
 async def test_signin_fixed_mode():
@@ -44,6 +44,10 @@ async def test_signin_fixed_mode():
         assert not r["already_signed"]
         # 固定 10 + 首次 50 + 每日首签 30 + 连签(第1天无加成) 0 = 90
         assert r["points"] == 90, r["points"]
+        # v0.2.2：反馈含当日签到排名/连签天数/当前积分
+        assert "今日第 1 位签到" in r["msg"], r["msg"]
+        assert "连签: 第 1 天" in r["msg"], r["msg"]
+        assert "当前积分: 90" in r["msg"], r["msg"]
         # 同日再签被拒
         r2 = await svc.sign_in("u1", "G1", "aiocqhttp", "签到")
         assert r2["already_signed"]
@@ -253,6 +257,13 @@ async def test_redeem_stock_discount_verify():
         assert r["success"], r
         rec = await t.db.fetchone("SELECT * FROM redeem_records WHERE qq='u1'")
         assert rec["item_cost"] == 200 and rec["quantity"] == 2
+        # v0.2.2：反馈含订单号/剩余库存/积分余额/核销提示，与 DB 一致
+        assert r["record_no"] == rec["record_no"], r
+        assert r["remaining_stock"] == 0 and r["balance"] == 300, r
+        assert rec["record_no"] in r["msg"], r["msg"]
+        assert "剩余库存: 0" in r["msg"], r["msg"]
+        assert "积分余额: 300" in r["msg"], r["msg"]
+        assert "联系管理员核销" in r["msg"], r["msg"]
         # 库存耗尽
         r = await svc.redeem("u1", "G1", item_id, 1)
         assert not r["success"] and "库存" in r["msg"]
@@ -359,6 +370,76 @@ async def test_negative_title_lifecycle():
         row = await t.dao.get_user("u1", "G1")
         assert row["negative_title_id"] is None
     return "负分头衔：分配/回正清除"
+
+
+async def test_negative_user_signin_recovers():
+    """负分用户签到恢复：签到加分回正余额后，自动清除负分头衔（含 bot 名片恢复）。"""
+    async with TempDB() as t:
+        await t.db.execute("UPDATE easter_events SET is_active=0")
+        from astrbot_plugin_point_system_by_whleague.services.date_reward_service import (
+            DateRewardService,
+        )
+        from astrbot_plugin_point_system_by_whleague.services.easter_service import (
+            EasterService,
+        )
+        from astrbot_plugin_point_system_by_whleague.services.point_service import (
+            PointService,
+        )
+        from astrbot_plugin_point_system_by_whleague.services.sign_in_service import (
+            SignInService,
+        )
+        from .common import FakeBot
+
+        cfg = base_cfg(
+            signin_fixed_mode=True,
+            signin_fixed_points=30,
+            signin_first_bonus=0,
+            signin_day_first_bonus=0,
+            signin_consecutive_max=30,
+            signin_consecutive_bonus_per_day=0,
+            signin_weekly_bonus=0,
+            birthday_bonus_points=0,
+        )
+        svc = SignInService(
+            t.db,
+            t.dao,
+            PointService(t.db, t.dao),
+            EasterService(t.dao),
+            DateRewardService(t.dao),
+            cfg,
+        )
+        await t.db.execute(
+            "INSERT INTO accounts (qq, points) VALUES ('10001',-10)"
+        )
+        await t.db.execute(
+            "INSERT INTO users (qq, group_id) VALUES ('10001','100001')"
+        )
+        bot = FakeBot()
+        ps = svc._point
+        # 先分配负分头衔（模拟签到负彩蛋/管理员扣分后状态）
+        new_id = await ps.ensure_negative_title("10001", "100001", bot=bot)
+        assert new_id == 1
+        assert any(
+            c["card"] == "群女仆1号"
+            for a, c in bot.calls
+            if a == "set_group_card"
+        )
+        bot.calls.clear()
+        # 负分签到：+30 回正为 +20，头衔自动清除并恢复名片
+        r = await svc.sign_in("10001", "100001", "aiocqhttp", "签到", bot=bot)
+        assert r["points"] == 30, r["points"]  # 本次获得
+        acct = await t.dao.get_account("10001")
+        assert acct["points"] == -10 + 30, acct["points"]  # 余额回正为 +20
+        user = await t.dao.get_user("10001", "100001")
+        assert user["negative_title_id"] is None  # 头衔已清除
+        restore_calls = [c for a, c in bot.calls if a == "set_group_card"]
+        assert any(c["card"] == "" for c in restore_calls), bot.calls
+        # 再次变负 → 头衔重新分配
+        await t.db.execute("UPDATE accounts SET points=-5 WHERE qq='10001'")
+        bot.calls.clear()
+        new_id = await ps.ensure_negative_title("10001", "100001", bot=bot)
+        assert new_id == 1
+    return "负分签到恢复：签到回正清除头衔+名片、再负重新分配"
 
 
 async def test_config_validate_full():
@@ -498,6 +579,7 @@ TESTS = [
     ("daily_keyword", test_daily_keyword),
     ("ranking_stats", test_ranking_stats),
     ("negative_title", test_negative_title_lifecycle),
+    ("negative_user_signin_recovers", test_negative_user_signin_recovers),
     ("config_validate", test_config_validate_full),
     ("clear_feature", test_clear_feature_regression),
 ]

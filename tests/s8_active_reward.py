@@ -158,6 +158,22 @@ async def test_ar_reward_added_and_sent():
     return "活跃奖励：加分入账+流水+发送文案"
 
 
+async def test_ar_sender_name_injection_cleaned():
+    """发送者昵称含控制字符时被剥离（防注入，v0.2.2）。"""
+    async with TempDB() as t:
+        handler, ps = await _handler_plugin(t, _cfg())
+        ev = FakeEvent("u1", "G1", msg="触发活跃奖励的消息内容")
+        ev._sender_name = "小明\r\n⚠️ 伪造公告\x00"
+        with patch_random(randint=4):
+            await handler.handle(ev)
+        assert len(ev.sent) == 1
+        text = str(ev.sent[0])
+        assert "\r" not in text and "\x00" not in text, text
+        assert "\n" not in text, text  # 控制字符剥离后无新增换行
+        assert "小明" in text and "活跃奖励" in text, text
+    return "活跃奖励：发送者昵称控制字符剥离"
+
+
 async def test_ar_daily_keyword_combined():
     async with TempDB() as t:
         handler, ps = await _handler_plugin(t, _cfg())
@@ -184,4 +200,5 @@ TESTS = [
     ("ar_negative_skipped", test_ar_negative_user_skipped),
     ("ar_reward_added", test_ar_reward_added_and_sent),
     ("ar_keyword_combined", test_ar_daily_keyword_combined),
+    ("ar_name_injection_cleaned", test_ar_sender_name_injection_cleaned),
 ]

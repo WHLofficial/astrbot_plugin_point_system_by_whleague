@@ -82,6 +82,12 @@ async def test_lottery_unlimited_and_accounting():
         with patch_random(randint=10):
             r = await svc.draw("u1", "G1")
         assert r["success"] and r["is_win"] and r["reward"] == 10 and "🎉" in r["msg"]
+        # v0.2.2：反馈含消耗/积分变化/当前积分
+        assert "消耗: 10 积分" in r["msg"], r["msg"]
+        assert "获得: +10 积分" in r["msg"], r["msg"]
+        assert "积分变化: +0" in r["msg"], r["msg"]
+        assert "当前积分: 1000" in r["msg"], r["msg"]
+        assert r["balance"] == 1000, r
         row = await t.dao.get_account("u1")
         assert row["points"] == 1000  # -10 成本 +10 奖励
         assert row["total_earned"] == 10  # 中奖计入累计获得
@@ -121,6 +127,8 @@ async def test_lottery_unlimited_and_accounting():
         with patch_random(randint=0):
             r = await svc2.draw("u1", "G1")
         assert r["success"] and not r["is_win"]
+        assert "未中奖" in r["msg"] and "积分变化: -10" in r["msg"], r["msg"]
+        assert "当前积分: 990" in r["msg"], r["msg"]
         row = await t.dao.get_account("u1")
         assert row["points"] == 990 and row["total_earned"] == 110  # 未中奖不计累计
         # 每日限额按业务日（period_start_str）判定：历史记录不计入今日
@@ -158,12 +166,20 @@ async def test_redeem_edge_stocks():
         for _ in range(3):
             r = await svc.redeem("u1", "G1", item_id, 1)
             assert r["success"], r
+            # 无限库存反馈：剩余库存显示 ∞
+            assert "剩余库存: ∞" in r["msg"], r["msg"]
+            assert "联系管理员核销" in r["msg"], r["msg"]
         item = await t.dao.get_item(item_id)
         assert item["stock"] == -1
         # 余额恰好相等
         await t.db.execute("UPDATE accounts SET points=10 WHERE qq='u1'")
         r = await svc.redeem("u1", "G1", item_id, 1)
         assert r["success"]
+        # 订单号格式与积分余额
+        from astrbot_plugin_point_system_by_whleague.utils.helpers import today_str
+
+        assert r["record_no"].startswith(f"R{today_str().replace('-', '')}-"), r
+        assert "积分余额: 0" in r["msg"], r["msg"]
         assert (await t.dao.get_account("u1"))["points"] == 0
         r = await svc.redeem("u1", "G1", item_id, 1)  # 现在不足
         assert not r["success"] and "积分不足" in r["msg"]

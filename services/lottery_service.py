@@ -75,7 +75,7 @@ class LotteryService:
                     raise LotteryError(f"今日抽奖次数已达上限 ({daily_limit} 次)")
             # 余额守卫在事务内生效，防止并发抽奖透支
             try:
-                await PointService.change_balance(
+                balance = await PointService.change_balance(
                     conn,
                     qq,
                     group_id,
@@ -87,16 +87,17 @@ class LotteryService:
             except InsufficientPointsError:
                 raise LotteryError(f"积分不足，需要 {cost} 积分")
             if reward > 0:
-                await PointService.change_balance(
+                balance = await PointService.change_balance(
                     conn, qq, group_id, reward, "lottery_reward"
                 )
             await conn.execute(
                 "INSERT INTO lottery_record (qq, group_id, cost, reward_amount, is_win, tier_label) VALUES (?,?,?,?,?,?)",
                 (qq, group_id, cost, reward, 1 if is_win else 0, chosen["label"]),
             )
+            return balance
 
         try:
-            await self._db.execute_transaction(_tx)
+            balance = await self._db.execute_transaction(_tx)
         except LotteryError as e:
             return {"success": False, "msg": str(e)}
 
@@ -106,6 +107,17 @@ class LotteryService:
             f"Lottery {qq}@{group_id}: {chosen['label']}, cost={cost}, reward={reward}"
         )
         emoji = chosen.get("emoji", "")
+        delta = reward - cost
+        lines = [
+            f"{emoji} {chosen['label']}",
+            f"  · 消耗: {cost} 积分",
+        ]
+        if is_win:
+            lines.append(f"  · 获得: +{reward} 积分")
+        else:
+            lines.append("  · 未中奖")
+        lines.append(f"  · 积分变化: {delta:+d}")
+        lines.append(f"  · 当前积分: {balance}")
         return {
             "success": True,
             "tier": chosen["label"],
@@ -113,7 +125,6 @@ class LotteryService:
             "cost": cost,
             "reward": reward,
             "is_win": is_win,
-            "msg": f"{emoji} {chosen['label']}\n\u83b7\u5f97 {reward} \u79ef\u5206"
-            if is_win
-            else f"{emoji} {chosen['label']}\n\u8d39\u7528 {cost} \u79ef\u5206\uff0c\u672a\u4e2d\u5956",
+            "balance": balance,
+            "msg": "\n".join(lines),
         }

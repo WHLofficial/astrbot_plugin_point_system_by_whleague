@@ -128,6 +128,7 @@ class SignInService:
                 first_bonus = (
                     cfg["signin_day_first_bonus"] if row and row[0] == 0 else 0
                 )
+                sign_order = row[0] + 1 if row else 1  # 当日签到排名（1 起）
             granted = total_points + first_bonus
             # 更新全局签到状态（accounts）
             await conn.execute(
@@ -177,10 +178,21 @@ class SignInService:
                 earned_amount=earned_inc,
                 ref_id=sign_in_log_id,
             )
-            return granted, first_bonus
+            # 读取变动后余额（当前积分）
+            async with conn.execute(
+                "SELECT points FROM accounts WHERE qq=?", (qq,)
+            ) as cur:
+                balance_row = await cur.fetchone()
+            balance = balance_row[0] if balance_row else 0
+            return granted, first_bonus, sign_order, balance
 
         try:
-            granted, bonus_day_first = await self._db.execute_transaction(_tx)
+            (
+                granted,
+                bonus_day_first,
+                sign_order,
+                balance,
+            ) = await self._db.execute_transaction(_tx)
         except AlreadySigned:
             return {"already_signed": True, "msg": "今天已经签到过了！"}
 
@@ -189,6 +201,9 @@ class SignInService:
 
         parts = [
             f"✅ 签到成功！获得 {granted:+d} 积分",
+            f"  · 今日第 {sign_order} 位签到",
+            f"  · 连签: 第 {consecutive} 天",
+            f"  · 当前积分: {balance}",
             f"  · 基础分: {base_points}",
         ]
         if bonus_first:

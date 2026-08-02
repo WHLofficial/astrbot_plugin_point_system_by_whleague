@@ -77,7 +77,7 @@ class RedeemService:
                     raise ValueError("库存不足")
             # 余额守卫在事务内生效，防止并发兑换透支
             try:
-                await PointService.change_balance(
+                balance = await PointService.change_balance(
                     conn,
                     qq,
                     group_id,
@@ -88,14 +88,23 @@ class RedeemService:
                 )
             except InsufficientPointsError:
                 raise ValueError(f"积分不足，需要 {total_cost} 积分")
+            # 事务内读取扣减后剩余库存（同事务视图，并发安全）
+            async with conn.execute(
+                "SELECT stock FROM redeem_items WHERE id=?", (item_id,)
+            ) as cur:
+                stock_row = await cur.fetchone()
+            remaining_stock = stock_row[0] if stock_row else 0
             record_no = await generate_record_no(conn)
             await conn.execute(
                 "INSERT INTO redeem_records (record_no, qq, group_id, item_id, item_name, item_cost, quantity) VALUES (?,?,?,?,?,?,?)",
                 (record_no, qq, group_id, item_id, item["name"], total_cost, quantity),
             )
+            return record_no, remaining_stock, balance
 
         try:
-            await self._db.execute_transaction(_tx)
+            record_no, remaining_stock, balance = await self._db.execute_transaction(
+                _tx
+            )
         except ValueError as e:
             return {"success": False, "msg": str(e)}
 
@@ -104,9 +113,20 @@ class RedeemService:
         logger.info(
             f"Redeem {qq}@{group_id}: {item['name']}x{quantity} for {total_cost}"
         )
+        stock_text = "∞ (无限)" if remaining_stock == -1 else str(remaining_stock)
+        msg = (
+            f"兑换成功！获得 {item['name']} x{quantity}，消耗 {total_cost} 积分\n"
+            f"  · 订单号: {record_no}\n"
+            f"  · 剩余库存: {stock_text}\n"
+            f"  · 积分余额: {balance}\n"
+            f"  · 请联系管理员核销"
+        )
         return {
             "success": True,
-            "msg": f"\u5151\u6362\u6210\u529f\uff01\u83b7\u5f97 {item['name']} x{quantity}\uff0c\u6d88\u8017 {total_cost} \u79ef\u5206",
+            "record_no": record_no,
+            "remaining_stock": remaining_stock,
+            "balance": balance,
+            "msg": msg,
         }
 
     async def set_discount(

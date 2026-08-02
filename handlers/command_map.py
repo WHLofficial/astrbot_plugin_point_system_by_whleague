@@ -94,7 +94,9 @@ class CommandMapHandler:
             logger.warning(f"Command map poster render failed: {e}")
 
         try:
-            out = await self._plugin.text_to_image(build_markdown(data), return_url=False)
+            out = await self._plugin.text_to_image(
+                build_markdown(data), return_url=False
+            )
             if out and not str(out).startswith("http"):
                 path = self.cache.store(sig, str(out), ttl_seconds)
                 if path:

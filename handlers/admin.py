@@ -742,7 +742,9 @@ class AdminHandler:
             await self._plugin.db.execute_transaction(_reseed)
         return counts
 
-    async def _restore_negative_cards(self, bot, scope: str, group_id: str | None) -> int:
+    async def _restore_negative_cards(
+        self, bot, scope: str, group_id: str | None
+    ) -> int:
         if scope == "group":
             rows = await self._plugin.db.fetchall(
                 "SELECT qq, group_id, negative_title_prev_card FROM users "

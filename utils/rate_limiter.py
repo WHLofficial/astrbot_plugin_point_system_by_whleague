@@ -1,5 +1,4 @@
 import time
-from collections import defaultdict
 
 _PRUNE_THRESHOLD = 2048
 _PRUNE_MAX_AGE = 3600.0

@@ -1,4 +1,3 @@
-from astrbot.api import logger
 from ..utils.helpers import today_mmdd, today_str
 
 

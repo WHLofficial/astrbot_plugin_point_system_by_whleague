@@ -388,7 +388,13 @@ def build_markdown(data: dict) -> str:
         f"插件版本：{data['version']}",
     ]
     for section in data["sections"]:
-        lines += ["", f"## {section['title']}", "", "| 指令 | 用法 | 说明 |", "|---|---|---|"]
+        lines += [
+            "",
+            f"## {section['title']}",
+            "",
+            "| 指令 | 用法 | 说明 |",
+            "|---|---|---|",
+        ]
         for entry in section["entries"]:
             name = entry["name"].replace("|", "\\|")
             usage = entry["usage"].replace("|", "\\|")

@@ -3,13 +3,41 @@ import re
 import zlib
 
 _LEVELS = [
-    ("\u4e0a\u4e0a\u7b7e", 5, "\u4f9d\u7b7e\u5230\uff0c\u4f9d\u62bd\u5956\uff0c\u4eca\u65e5\u9e3f\u8fd0\u5f53\u5934\uff01"),
-    ("\u4e0a\u7b7e", 10, "\u8fd0\u52bf\u4e0d\u9519\uff0c\u9002\u5408\u5927\u80c6\u4e00\u640f\uff01"),
-    ("\u4e2d\u5409", 15, "\u5e73\u7a33\u4e2d\u6709\u60ca\u559c\uff0c\u503c\u5f97\u671f\u5f85\u3002"),
-    ("\u4e2d\u5e73", 25, "\u5e73\u6de1\u662f\u771f\uff0c\u7a33\u624e\u7a33\u6253\u3002"),
-    ("\u672b\u5409", 25, "\u7a0d\u5b89\u52ff\u8e81\uff0c\u597d\u8fd0\u5728\u8def\u4e0a\u3002"),
-    ("\u672b\u7b7e", 15, "\u8bf8\u4e8b\u4e0d\u5b9c\uff1f\u7761\u5927\u89c9\u624d\u662f\u6b63\u9053\u3002"),
-    ("\u5927\u51f6", 5, "\u975e\u8457\u9644\u4f53\uff0c\u5efa\u8bae\u7b7e\u5230\u8f6c\u8fd0\u3002"),
+    (
+        "\u4e0a\u4e0a\u7b7e",
+        5,
+        "\u4f9d\u7b7e\u5230\uff0c\u4f9d\u62bd\u5956\uff0c\u4eca\u65e5\u9e3f\u8fd0\u5f53\u5934\uff01",
+    ),
+    (
+        "\u4e0a\u7b7e",
+        10,
+        "\u8fd0\u52bf\u4e0d\u9519\uff0c\u9002\u5408\u5927\u80c6\u4e00\u640f\uff01",
+    ),
+    (
+        "\u4e2d\u5409",
+        15,
+        "\u5e73\u7a33\u4e2d\u6709\u60ca\u559c\uff0c\u503c\u5f97\u671f\u5f85\u3002",
+    ),
+    (
+        "\u4e2d\u5e73",
+        25,
+        "\u5e73\u6de1\u662f\u771f\uff0c\u7a33\u624e\u7a33\u6253\u3002",
+    ),
+    (
+        "\u672b\u5409",
+        25,
+        "\u7a0d\u5b89\u52ff\u8e81\uff0c\u597d\u8fd0\u5728\u8def\u4e0a\u3002",
+    ),
+    (
+        "\u672b\u7b7e",
+        15,
+        "\u8bf8\u4e8b\u4e0d\u5b9c\uff1f\u7761\u5927\u89c9\u624d\u662f\u6b63\u9053\u3002",
+    ),
+    (
+        "\u5927\u51f6",
+        5,
+        "\u975e\u8457\u9644\u4f53\uff0c\u5efa\u8bae\u7b7e\u5230\u8f6c\u8fd0\u3002",
+    ),
 ]
 
 _ADVICE = [
@@ -31,9 +59,7 @@ _ADVICE = [
 def get_fortune(qq: str, date_str: str) -> dict:
     seed_val = zlib.crc32(f"{qq}_{date_str}".encode())
     rng = random.Random(seed_val)
-    level_name, _, _ = rng.choices(
-        _LEVELS, weights=[w for _, w, _ in _LEVELS]
-    )[0]
+    level_name, _, _ = rng.choices(_LEVELS, weights=[w for _, w, _ in _LEVELS])[0]
     lucky_num = rng.randint(1, 99)
     advice = rng.choice(_ADVICE)
     return {

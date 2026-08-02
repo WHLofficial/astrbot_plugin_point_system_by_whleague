@@ -1,5 +1,4 @@
 from datetime import datetime, timedelta
-from typing import Optional
 
 _DEFAULT_BOUNDARY = (4, 0)
 _day_boundary = _DEFAULT_BOUNDARY
@@ -45,7 +44,7 @@ def period_start_str() -> str:
     return day.strftime("%Y-%m-%d") + f" {h:02d}:{m:02d}:00"
 
 
-def is_date_in_range(target_mmdd: str, start: str, end: Optional[str] = None) -> bool:
+def is_date_in_range(target_mmdd: str, start: str, end: str | None = None) -> bool:
     if end is None:
         return target_mmdd == start
     if start <= end:
@@ -53,7 +52,7 @@ def is_date_in_range(target_mmdd: str, start: str, end: Optional[str] = None) ->
     return target_mmdd >= start or target_mmdd <= end
 
 
-async def generate_record_no(conn, date_prefix: Optional[str] = None) -> str:
+async def generate_record_no(conn, date_prefix: str | None = None) -> str:
     """在事务内生成兑换记录编号（并发安全：随事务持锁计数）。"""
     if date_prefix is None:
         date_prefix = today_str().replace("-", "")

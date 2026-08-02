@@ -1,4 +1,5 @@
 import random
+
 from astrbot.api import logger
 
 
@@ -6,7 +7,9 @@ class EasterService:
     def __init__(self, dao):
         self._dao = dao
 
-    async def trigger(self, qq: str, group_id: str, lucky_pity: int, unlucky_pity: int) -> dict:
+    async def trigger(
+        self, qq: str, group_id: str, lucky_pity: int, unlucky_pity: int
+    ) -> dict:
         """计算彩蛋结果与新的保底计数，不写库（写入由调用方在事务内完成）。"""
         events = await self._dao.get_active_easter_events()
         lucky_events = [e for e in events if e["event_type"] == "lucky"]

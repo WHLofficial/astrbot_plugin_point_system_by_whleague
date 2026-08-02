@@ -1,6 +1,8 @@
 from collections.abc import AsyncGenerator
+
 from astrbot.api import logger
 from astrbot.api.event import MessageEventResult
+
 from ..utils.keyword_matcher import is_lottery_message, is_signin_message
 
 
@@ -27,8 +29,12 @@ class LotteryHandler:
             if not is_lottery_message(msg, passphrase, lottery_kw):
                 return
 
-            result = await self._plugin.lottery_service.draw(qq, group_id, bot=getattr(event, "bot", None))
+            result = await self._plugin.lottery_service.draw(
+                qq, group_id, bot=getattr(event, "bot", None)
+            )
             yield event.plain_result(result["msg"])
         except Exception as e:
             logger.error(f"Lottery error for {event.get_sender_id()}: {e}")
-            yield event.plain_result("\u62bd\u5956\u5931\u8d25\uff0c\u5df2\u8bb0\u5f55\u9519\u8bef")
+            yield event.plain_result(
+                "\u62bd\u5956\u5931\u8d25\uff0c\u5df2\u8bb0\u5f55\u9519\u8bef"
+            )

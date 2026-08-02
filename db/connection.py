@@ -1,7 +1,8 @@
-import os
 import asyncio
+import os
+
 import aiosqlite
-from typing import Optional
+
 from astrbot.api import logger
 
 _RETRY_COUNT = 3
@@ -33,13 +34,13 @@ def _default_db_path() -> str:
 
 
 class DatabaseManager:
-    def __init__(self, db_path: Optional[str] = None):
+    def __init__(self, db_path: str | None = None):
         if db_path is None:
             db_path = _default_db_path()
         self._db_path = db_path
-        self._conn: Optional[aiosqlite.Connection] = None
+        self._conn: aiosqlite.Connection | None = None
         self._lock = asyncio.Lock()
-        self._lock_owner: Optional[asyncio.Task] = None
+        self._lock_owner: asyncio.Task | None = None
         """当前持有写锁的任务（仅用于检测事务回调内的重入调用）。"""
 
     async def init(self) -> None:
@@ -123,7 +124,10 @@ class DatabaseManager:
                         return result
                     except aiosqlite.OperationalError as e:
                         await conn.rollback()
-                        if "database is locked" in str(e) and attempt < _RETRY_COUNT - 1:
+                        if (
+                            "database is locked" in str(e)
+                            and attempt < _RETRY_COUNT - 1
+                        ):
                             await asyncio.sleep(_RETRY_DELAY * (attempt + 1))
                             continue
                         raise

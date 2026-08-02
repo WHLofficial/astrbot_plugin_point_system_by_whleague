@@ -15,15 +15,43 @@ class PointDAO:
     def _now_str(self) -> str:
         return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+    # ─── accounts ─────────────────────────────────────────
+
+    async def get_account(self, qq: str):
+        return await self._db.fetchone("SELECT * FROM accounts WHERE qq=?", (qq,))
+
+    async def ensure_account(self, qq: str, platform: str = ""):
+        await self._db.execute("INSERT OR IGNORE INTO accounts (qq) VALUES (?)", (qq,))
+        if platform:
+            await self._db.execute(
+                "UPDATE accounts SET platform=?, updated_at=datetime('now','localtime') WHERE qq=? AND platform != ?",
+                (platform, qq, platform),
+            )
+        return await self.get_account(qq)
+
+    async def get_balance(self, qq: str) -> int:
+        row = await self._db.fetchone("SELECT points FROM accounts WHERE qq=?", (qq,))
+        return row["points"] if row else 0
+
+    async def get_user_groups(self, qq: str) -> list:
+        rows = await self._db.fetchall("SELECT group_id FROM users WHERE qq=?", (qq,))
+        return [r["group_id"] for r in rows]
+
+    async def set_account_birthday(self, qq: str, birthday: str):
+        await self._db.execute(
+            "UPDATE accounts SET birthday=?, birthday_year=NULL, updated_at=datetime('now','localtime') WHERE qq=?",
+            (birthday, qq),
+        )
+
     # ─── users ────────────────────────────────────────────
 
     async def get_user(self, qq: str, group_id: str):
         sql = "SELECT * FROM users WHERE qq=? AND group_id=?"
         return await self._db.fetchone(sql, (qq, group_id))
 
-    async def create_user(self, qq: str, group_id: str, platform: str = ""):
-        sql = "INSERT OR IGNORE INTO users (qq, group_id, platform) VALUES (?, ?, ?)"
-        cur = await self._db.execute(sql, (qq, group_id, platform))
+    async def create_user(self, qq: str, group_id: str):
+        sql = "INSERT OR IGNORE INTO users (qq, group_id) VALUES (?, ?)"
+        cur = await self._db.execute(sql, (qq, group_id))
         try:
             return cur.lastrowid
         finally:
@@ -31,24 +59,17 @@ class PointDAO:
 
     async def ensure_user(self, qq: str, group_id: str, platform: str = ""):
         user = await self.get_user(qq, group_id)
-        if user:
-            if platform and user["platform"] != platform:
-                await self._db.execute(
-                    "UPDATE users SET platform=? WHERE qq=? AND group_id=?",
-                    (platform, qq, group_id),
-                )
-            return user
-        await self.create_user(qq, group_id, platform)
-        return await self.get_user(qq, group_id)
-
-    async def get_user_balance(self, qq: str, group_id: str) -> int:
-        row = await self._db.fetchone(
-            "SELECT points FROM users WHERE qq=? AND group_id=?", (qq, group_id)
-        )
-        return row["points"] if row else 0
+        if not user:
+            await self.create_user(qq, group_id)
+            user = await self.get_user(qq, group_id)
+        await self.ensure_account(qq, platform)
+        return user
 
     async def set_negative_title(
-        self, qq: str, group_id: str, title_id: int | None,
+        self,
+        qq: str,
+        group_id: str,
+        title_id: int | None,
         prev_card: str | None = None,
     ):
         if title_id is None:
@@ -64,13 +85,18 @@ class PointDAO:
 
     async def get_top_n_by_group(self, group_id: str, n: int, min_points: int = 1):
         return await self._db.fetchall(
-            "SELECT qq, points, total_earned, consecutive_days FROM users WHERE group_id=? AND points>=? ORDER BY points DESC LIMIT ?",
+            "SELECT u.qq, a.points, a.total_earned FROM users u "
+            "JOIN accounts a ON a.qq=u.qq "
+            "WHERE u.group_id=? AND a.points>=? ORDER BY a.points DESC LIMIT ?",
             (group_id, min_points, n),
         )
 
     async def get_top_n_global(self, n: int, min_points: int = 1):
         return await self._db.fetchall(
-            "SELECT qq, group_id, points, total_earned FROM users WHERE points>=? ORDER BY points DESC LIMIT ?",
+            "SELECT a.qq, a.points, a.total_earned, "
+            "(SELECT u2.group_id FROM users u2 WHERE u2.qq=a.qq "
+            " ORDER BY u2.updated_at DESC, u2.id DESC LIMIT 1) AS group_id "
+            "FROM accounts a WHERE a.points>=? ORDER BY a.points DESC LIMIT ?",
             (min_points, n),
         )
 
@@ -82,7 +108,9 @@ class PointDAO:
 
     async def get_birthday_users(self, group_id: str, today_mmdd: str):
         return await self._db.fetchall(
-            "SELECT qq FROM users WHERE group_id=? AND birthday=?", (group_id, today_mmdd)
+            "SELECT u.qq FROM users u JOIN accounts a ON a.qq=u.qq "
+            "WHERE u.group_id=? AND a.birthday=?",
+            (group_id, today_mmdd),
         )
 
     async def get_all_group_ids(self):
@@ -106,18 +134,22 @@ class PointDAO:
 
     async def get_max_streak_today(self, group_id: str):
         return await self._db.fetchone(
-            """SELECT u.qq, u.consecutive_days FROM users u
-               INNER JOIN sign_in_log s ON u.qq=s.qq AND u.group_id=s.group_id
+            """SELECT u.qq, a.consecutive_days FROM users u
+               JOIN accounts a ON a.qq=u.qq
+               INNER JOIN sign_in_log s ON s.qq=u.qq AND s.group_id=u.group_id
                WHERE u.group_id=? AND s.sign_date=?
-               ORDER BY u.consecutive_days DESC, s.created_at ASC LIMIT 1""",
+               ORDER BY a.consecutive_days DESC, s.created_at ASC LIMIT 1""",
             (group_id, self._today_str()),
         )
 
     # ─── point_transactions ────────────────────────────────
 
     async def get_transactions(
-        self, qq: str | None = None, group_id: str | None = None,
-        limit: int = 10, offset: int = 0,
+        self,
+        qq: str | None = None,
+        group_id: str | None = None,
+        limit: int = 10,
+        offset: int = 0,
     ):
         conditions = []
         params = []
@@ -163,7 +195,14 @@ class PointDAO:
         )
 
     async def update_item_field(self, item_id: int, field: str, value):
-        allowed = {"name", "cost", "stock", "description", "discount_price", "discount_end_time"}
+        allowed = {
+            "name",
+            "cost",
+            "stock",
+            "description",
+            "discount_price",
+            "discount_end_time",
+        }
         if field not in allowed:
             raise ValueError(f"Field '{field}' not allowed")
         sql = f"UPDATE redeem_items SET {field}=?, updated_at=datetime('now','localtime') WHERE id=?"
@@ -177,7 +216,11 @@ class PointDAO:
         )
 
     async def get_redeem_records_by_user(
-        self, qq: str, group_id: str | None = None, limit: int = 10, offset: int = 0,
+        self,
+        qq: str,
+        group_id: str | None = None,
+        limit: int = 10,
+        offset: int = 0,
     ):
         if group_id:
             return await self._db.fetchall(
@@ -190,8 +233,11 @@ class PointDAO:
         )
 
     async def get_redeem_records_all(
-        self, status: str | None = None, group_id: str | None = None,
-        limit: int = 10, offset: int = 0,
+        self,
+        status: str | None = None,
+        group_id: str | None = None,
+        limit: int = 10,
+        offset: int = 0,
     ):
         conditions = []
         params = []
@@ -249,9 +295,7 @@ class PointDAO:
     # ─── date_rewards ─────────────────────────────────────
 
     async def get_active_date_rewards(self):
-        return await self._db.fetchall(
-            "SELECT * FROM date_rewards WHERE is_active=1"
-        )
+        return await self._db.fetchall("SELECT * FROM date_rewards WHERE is_active=1")
 
     async def get_all_date_rewards(self):
         return await self._db.fetchall(
@@ -278,9 +322,7 @@ class PointDAO:
     # ─── easter_events ────────────────────────────────────
 
     async def get_active_easter_events(self):
-        return await self._db.fetchall(
-            "SELECT * FROM easter_events WHERE is_active=1"
-        )
+        return await self._db.fetchall("SELECT * FROM easter_events WHERE is_active=1")
 
     # ─── birthday_announce_log ─────────────────────────────
 
@@ -291,7 +333,9 @@ class PointDAO:
         )
         return row is not None
 
-    async def mark_birthday_announced(self, group_id: str, announce_date: str, qq_list: str):
+    async def mark_birthday_announced(
+        self, group_id: str, announce_date: str, qq_list: str
+    ):
         await self._db.execute(
             "INSERT OR IGNORE INTO birthday_announce_log (group_id, announce_date, announced_qqs) VALUES (?, ?, ?)",
             (group_id, announce_date, qq_list),
@@ -305,7 +349,9 @@ class PointDAO:
             (group_id, set_date),
         )
 
-    async def set_daily_keyword(self, group_id: str, keyword: str, points: int, set_by: str):
+    async def set_daily_keyword(
+        self, group_id: str, keyword: str, points: int, set_by: str
+    ):
         today = self._today_str()
         # 使用 UPSERT 而非 INSERT OR REPLACE：REPLACE 会先 DELETE 旧行，
         # 已被领取的 daily_keyword_claim 存在外键引用会导致约束失败

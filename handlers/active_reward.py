@@ -1,7 +1,9 @@
 import random
+
 from astrbot.api import logger
 from astrbot.api.event import MessageChain
-from ..utils.keyword_matcher import is_signin_message, is_lottery_message
+
+from ..utils.keyword_matcher import is_lottery_message, is_signin_message
 
 
 class ActiveRewardHandler:
@@ -61,7 +63,7 @@ class ActiveRewardHandler:
             if random.random() > cfg["active_reward_probability"]:
                 return
 
-            is_neg = await self._plugin.point_service.is_negative(qq, group_id)
+            is_neg = await self._plugin.point_service.is_negative(qq)
             if is_neg:
                 return
 

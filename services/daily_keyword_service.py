@@ -1,5 +1,7 @@
 from astrbot.api import logger
-from ..utils.helpers import today_str
+
+from ..utils.helpers import period_start_str, today_str
+from .point_service import PointService
 
 
 class AlreadyClaimed(Exception):
@@ -32,7 +34,9 @@ class DailyKeywordService:
         """管理员设置/清除口令后调用，使当日缓存失效。"""
         self._cache.pop((group_id, today_str()), None)
 
-    async def check_and_claim(self, qq: str, group_id: str, message: str, bot=None) -> dict:
+    async def check_and_claim(
+        self, qq: str, group_id: str, message: str, bot=None
+    ) -> dict:
         today = today_str()
         kw_record = await self._get_kw(group_id, today)
         if not kw_record:
@@ -47,12 +51,20 @@ class DailyKeywordService:
             return {"claimed": False, "already": True}
 
         points = kw_record["points"]
-        is_neg = await self._point.is_negative(qq, group_id)
+        is_neg = await self._point.is_negative(qq)
         if is_neg:
             return {"claimed": False, "blocked": True}
 
         async def _tx(conn):
-            # 事务内以 rowcount 判定，防止并发重复领取
+            # 全局限领 1 次（v0.2.1）：同用户当天在任意群已领取过口令则拒绝，
+            # 与口令内容、群无关；事务内查重 + BEGIN IMMEDIATE 串行化防并发
+            async with conn.execute(
+                "SELECT 1 FROM daily_keyword_claim WHERE qq=? AND created_at>=? LIMIT 1",
+                (qq, period_start_str()),
+            ) as cur:
+                if await cur.fetchone():
+                    raise AlreadyClaimed()
+            # 事务内以 rowcount 判定，防止并发重复领取（同群同口令）
             async with conn.execute(
                 "INSERT OR IGNORE INTO daily_keyword_claim (kw_id, qq, group_id, points_earned) VALUES (?,?,?,?)",
                 (kw_record["id"], qq, group_id, points),
@@ -61,20 +73,15 @@ class DailyKeywordService:
                     raise AlreadyClaimed()
             # 事务内负分拦截：与事务外快速检查互补，消除竞态窗口
             async with conn.execute(
-                "SELECT points FROM users WHERE qq=? AND group_id=?", (qq, group_id)
+                "SELECT points FROM accounts WHERE qq=?", (qq,)
             ) as cur:
                 row = await cur.fetchone()
             if row and row["points"] < 0:
                 raise BlockedClaim()
-            # 未签到过的用户无 users 行，先补建再加分
-            await conn.execute(
-                "INSERT OR IGNORE INTO users (qq, group_id) VALUES (?, ?)",
-                (qq, group_id),
+            # 未签到过的用户无账户行，change_balance 会补建（accounts + 群成员行）
+            await PointService.change_balance(
+                conn, qq, group_id, points, "daily_keyword"
             )
-            await conn.execute("UPDATE users SET points=points+?, total_earned=total_earned+?, updated_at=datetime('now','localtime') WHERE qq=? AND group_id=?", (points, points, qq, group_id))
-            async with conn.execute("SELECT points FROM users WHERE qq=? AND group_id=?", (qq, group_id)) as cur:
-                bal = (await cur.fetchone())[0]
-            await conn.execute("INSERT INTO point_transactions (qq, group_id, amount, balance_after, reason) VALUES (?,?,?,?,?)", (qq, group_id, points, bal, "daily_keyword"))
 
         try:
             await self._db.execute_transaction(_tx)

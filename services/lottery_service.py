@@ -1,7 +1,10 @@
-import random
 import json
+import random
+
 from astrbot.api import logger
+
 from ..utils.helpers import period_start_str
+from .point_service import InsufficientPointsError, PointService
 
 
 class LotteryError(Exception):
@@ -17,17 +20,20 @@ class LotteryService:
 
     async def draw(self, qq: str, group_id: str, bot=None) -> dict:
         if not self._cfg["lottery_enabled"]:
-            return {"success": False, "msg": "\u62bd\u5956\u529f\u80fd\u5df2\u5173\u95ed"}
+            return {"success": False, "msg": "抽奖功能已关闭"}
 
         cost = self._cfg["lottery_cost"]
-        balance = await self._point.get_balance(qq, group_id)
+        balance = await self._point.get_balance(qq)
         if balance < cost:
-            return {"success": False, "msg": f"\u79ef\u5206\u4e0d\u8db3\uff0c\u9700\u8981 {cost} \u79ef\u5206\uff0c\u5f53\u524d {balance}"}
+            return {
+                "success": False,
+                "msg": f"积分不足，需要 {cost} 积分，当前 {balance}",
+            }
 
         if self._cfg["negative_disable_lottery"]:
-            is_neg = await self._point.is_negative(qq, group_id)
+            is_neg = await self._point.is_negative(qq)
             if is_neg:
-                return {"success": False, "msg": "\u79ef\u5206\u4e3a\u8d1f\uff0c\u65e0\u6cd5\u62bd\u5956\uff0c\u8bf7\u5148\u7b7e\u5230\u6062\u590d\u79ef\u5206"}
+                return {"success": False, "msg": "积分为负，无法抽奖，请先签到恢复积分"}
 
         raw = self._cfg["lottery_tiers"]
         if isinstance(raw, str):
@@ -36,7 +42,10 @@ class LotteryService:
             data = raw
         tiers = data["tiers"]
         if not tiers:
-            return {"success": False, "msg": "\u62bd\u5956\u6863\u4f4d\u672a\u914d\u7f6e"}
+            return {
+                "success": False,
+                "msg": "\u62bd\u5956\u6863\u4f4d\u672a\u914d\u7f6e",
+            }
 
         weights = [t["weight"] for t in tiers]
         total_weight = sum(weights)
@@ -55,30 +64,36 @@ class LotteryService:
         daily_limit = self._cfg["lottery_daily_limit"]
 
         async def _tx(conn):
+            # 每日限次按 QQ 全局统计（v0.2.1：跨群共享钱包，各群不能分开刷满）
             if daily_limit > 0:
                 async with conn.execute(
-                    "SELECT COUNT(*) AS cnt FROM lottery_record WHERE qq=? AND group_id=? AND created_at>=?",
-                    (qq, group_id, period_start_str()),
+                    "SELECT COUNT(*) AS cnt FROM lottery_record WHERE qq=? AND created_at>=?",
+                    (qq, period_start_str()),
                 ) as cur:
                     row = await cur.fetchone()
                 if row and row[0] >= daily_limit:
-                    raise LotteryError(f"\u4eca\u65e5\u62bd\u5956\u6b21\u6570\u5df2\u8fbe\u4e0a\u9650 ({daily_limit} \u6b21)")
+                    raise LotteryError(f"今日抽奖次数已达上限 ({daily_limit} 次)")
             # 余额守卫在事务内生效，防止并发抽奖透支
-            async with conn.execute(
-                "UPDATE users SET points=points-? WHERE qq=? AND group_id=? AND points>=?",
-                (cost, qq, group_id, cost),
-            ) as cur:
-                if cur.rowcount == 0:
-                    raise LotteryError(f"\u79ef\u5206\u4e0d\u8db3\uff0c\u9700\u8981 {cost} \u79ef\u5206")
-            async with conn.execute("SELECT points FROM users WHERE qq=? AND group_id=?", (qq, group_id)) as cur:
-                bal1 = (await cur.fetchone())[0]
-            await conn.execute("INSERT INTO point_transactions (qq, group_id, amount, balance_after, reason) VALUES (?,?,?,?,?)", (qq, group_id, -cost, bal1, "lottery_cost"))
+            try:
+                await PointService.change_balance(
+                    conn,
+                    qq,
+                    group_id,
+                    -cost,
+                    "lottery_cost",
+                    earned_amount=0,
+                    guard_balance=cost,
+                )
+            except InsufficientPointsError:
+                raise LotteryError(f"积分不足，需要 {cost} 积分")
             if reward > 0:
-                await conn.execute("UPDATE users SET points=points+?, total_earned=total_earned+? WHERE qq=? AND group_id=?", (reward, reward, qq, group_id))
-                async with conn.execute("SELECT points FROM users WHERE qq=? AND group_id=?", (qq, group_id)) as cur2:
-                    bal2 = (await cur2.fetchone())[0]
-                await conn.execute("INSERT INTO point_transactions (qq, group_id, amount, balance_after, reason) VALUES (?,?,?,?,?)", (qq, group_id, reward, bal2, "lottery_reward"))
-            await conn.execute("INSERT INTO lottery_record (qq, group_id, cost, reward_amount, is_win, tier_label) VALUES (?,?,?,?,?,?)", (qq, group_id, cost, reward, 1 if is_win else 0, chosen["label"]))
+                await PointService.change_balance(
+                    conn, qq, group_id, reward, "lottery_reward"
+                )
+            await conn.execute(
+                "INSERT INTO lottery_record (qq, group_id, cost, reward_amount, is_win, tier_label) VALUES (?,?,?,?,?,?)",
+                (qq, group_id, cost, reward, 1 if is_win else 0, chosen["label"]),
+            )
 
         try:
             await self._db.execute_transaction(_tx)
@@ -87,7 +102,9 @@ class LotteryService:
 
         await self._point.ensure_negative_title(qq, group_id, bot=bot)
 
-        logger.info(f"Lottery {qq}@{group_id}: {chosen['label']}, cost={cost}, reward={reward}")
+        logger.info(
+            f"Lottery {qq}@{group_id}: {chosen['label']}, cost={cost}, reward={reward}"
+        )
         emoji = chosen.get("emoji", "")
         return {
             "success": True,
@@ -96,5 +113,7 @@ class LotteryService:
             "cost": cost,
             "reward": reward,
             "is_win": is_win,
-            "msg": f"{emoji} {chosen['label']}\n\u83b7\u5f97 {reward} \u79ef\u5206" if is_win else f"{emoji} {chosen['label']}\n\u8d39\u7528 {cost} \u79ef\u5206\uff0c\u672a\u4e2d\u5956",
+            "msg": f"{emoji} {chosen['label']}\n\u83b7\u5f97 {reward} \u79ef\u5206"
+            if is_win
+            else f"{emoji} {chosen['label']}\n\u8d39\u7528 {cost} \u79ef\u5206\uff0c\u672a\u4e2d\u5956",
         }

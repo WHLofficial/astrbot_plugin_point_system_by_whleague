@@ -1,4 +1,4 @@
-﻿import json
+import json
 import random
 import time
 from collections.abc import AsyncGenerator
@@ -10,7 +10,8 @@ from ..utils.security import parse_int, parse_qq, parse_qq_arg, sanitize_text
 
 _CLEAR_TOKEN_TTL = 300.0
 
-# 清空范围对应的表（顺序即删除顺序，先删子表再删父表以通过外键约束）
+# 群清空范围对应的表（顺序即删除顺序，先删子表再删父表以通过外键约束）。
+# 群清空=清零本群成员的共享积分 + 删除群级记录，users（成员关系）与 accounts（身份）保留。
 _GROUP_CLEAR_TABLES = (
     "daily_keyword_claim",
     "daily_keyword",
@@ -19,7 +20,6 @@ _GROUP_CLEAR_TABLES = (
     "lottery_record",
     "point_transactions",
     "birthday_announce_log",
-    "users",
 )
 _GLOBAL_CLEAR_TABLES = (
     "daily_keyword_claim",
@@ -34,6 +34,7 @@ _GLOBAL_CLEAR_TABLES = (
     "admins",
     "easter_events",
     "users",
+    "accounts",
 )
 
 
@@ -80,7 +81,9 @@ class AdminHandler:
         except Exception as e:
             logger.warning(f"Failed to fetch group info for owner check: {e}")
             return False
-        return group is not None and str(group.group_owner) == str(event.get_sender_id())
+        return group is not None and str(group.group_owner) == str(
+            event.get_sender_id()
+        )
 
     async def _require_admin(self, event) -> bool:
         """普通协程（非生成器）：返回是否有管理员权限。"""
@@ -95,7 +98,9 @@ class AdminHandler:
     async def _deny(self, event) -> AsyncGenerator[MessageEventResult, None]:
         yield event.plain_result("你没有权限执行此操作")
 
-    async def adjust_points(self, event, action: str) -> AsyncGenerator[MessageEventResult, None]:
+    async def adjust_points(
+        self, event, action: str
+    ) -> AsyncGenerator[MessageEventResult, None]:
         if not await self._require_admin(event):
             async for r in self._deny(event):
                 yield r
@@ -116,17 +121,30 @@ class AdminHandler:
             reason = "admin_add" if action == "加分" else "admin_sub"
             if action == "加分":
                 r = await self._plugin.point_service.add(
-                    target, group_id, amount, reason, admin_override=True,
-                    admin_qq=admin_qq, bot=getattr(event, "bot", None),
+                    target,
+                    group_id,
+                    amount,
+                    reason,
+                    admin_override=True,
+                    admin_qq=admin_qq,
+                    bot=getattr(event, "bot", None),
                 )
-                yield event.plain_result(f"已给 {target} 加 {amount} 积分，当前余额: {r['balance']}")
+                yield event.plain_result(
+                    f"已给 {target} 加 {amount} 积分，当前余额: {r['balance']}"
+                )
             else:
                 try:
                     r = await self._plugin.point_service.subtract(
-                        target, group_id, amount, reason,
-                        admin_qq=admin_qq, bot=getattr(event, "bot", None),
+                        target,
+                        group_id,
+                        amount,
+                        reason,
+                        admin_qq=admin_qq,
+                        bot=getattr(event, "bot", None),
                     )
-                    yield event.plain_result(f"已给 {target} 扣 {amount} 积分，当前余额: {r['balance']}")
+                    yield event.plain_result(
+                        f"已给 {target} 扣 {amount} 积分，当前余额: {r['balance']}"
+                    )
                 except ValueError as e:
                     yield event.plain_result(str(e))
         except (ValueError, IndexError) as e:
@@ -152,7 +170,9 @@ class AdminHandler:
             if len(parts) >= 4:
                 stock = parse_int(parts[3], min_val=-1)
             await self._plugin.dao.add_item(name, cost, stock)
-            yield event.plain_result(f"已添加兑换物品: {name} (消耗{cost}积分, 库存{stock})")
+            yield event.plain_result(
+                f"已添加兑换物品: {name} (消耗{cost}积分, 库存{stock})"
+            )
         except (ValueError, IndexError) as e:
             yield event.plain_result(f"参数错误: {e}")
         except Exception as e:
@@ -205,6 +225,7 @@ class AdminHandler:
                     return
             elif field == "discount_end_time":
                 from datetime import datetime
+
                 try:
                     datetime.strptime(raw_value, "%Y-%m-%d %H:%M")
                 except ValueError:
@@ -275,6 +296,7 @@ class AdminHandler:
             key = parts[1]
             value = parts[2]
             from ..config.defaults import validate_and_cast
+
             parsed = validate_and_cast(key, value)
             new_cache = dict(self._plugin.config_cache)
             new_cache[key] = parsed
@@ -285,12 +307,20 @@ class AdminHandler:
                 yield event.plain_result("signin_random_max 不能小于 signin_random_min")
                 return
             if key in ("active_reward_points_min", "active_reward_points_max"):
-                other = "active_reward_points_max" if key == "active_reward_points_min" else "active_reward_points_min"
+                other = (
+                    "active_reward_points_max"
+                    if key == "active_reward_points_min"
+                    else "active_reward_points_min"
+                )
                 if key == "active_reward_points_min" and parsed > new_cache[other]:
-                    yield event.plain_result("active_reward_points_min 不能大于 active_reward_points_max")
+                    yield event.plain_result(
+                        "active_reward_points_min 不能大于 active_reward_points_max"
+                    )
                     return
                 if key == "active_reward_points_max" and parsed < new_cache[other]:
-                    yield event.plain_result("active_reward_points_max 不能小于 active_reward_points_min")
+                    yield event.plain_result(
+                        "active_reward_points_max 不能小于 active_reward_points_min"
+                    )
                     return
             if key in ("keyword_sign", "keyword_lottery", "backup_dirs"):
                 stored = json.dumps(parsed, ensure_ascii=False)
@@ -304,6 +334,7 @@ class AdminHandler:
                 await self._plugin.dao.set_config(key, stored)
             if key == "signin_refresh_time":
                 from ..utils.helpers import set_day_boundary
+
                 set_day_boundary(parsed)
             if key in ("backup_time", "birthday_announce_time", "backup_enabled"):
                 await self._plugin.reschedule_cron_jobs()
@@ -321,6 +352,7 @@ class AdminHandler:
             return
         try:
             from ..config.defaults import DEFAULT_CONFIG
+
             lines = ["⚙ 当前配置"]
             for key, default in DEFAULT_CONFIG.items():
                 val = self._plugin.config_cache.get(key, default)
@@ -350,7 +382,9 @@ class AdminHandler:
             item_id = parse_int(parts[1], min_val=1)
             price = parse_int(parts[2], min_val=1)
             end_time = parts[3]
-            result = await self._plugin.redeem_service.set_discount(item_id, price, end_time)
+            result = await self._plugin.redeem_service.set_discount(
+                item_id, price, end_time
+            )
             yield event.plain_result(result["msg"])
         except (ValueError, IndexError) as e:
             yield event.plain_result(f"参数错误: {e}")
@@ -433,9 +467,12 @@ class AdminHandler:
         try:
             parts = event.get_message_str().split(maxsplit=4)
             if len(parts) < 4:
-                yield event.plain_result("用法: /添加日期奖励 <MM-DD|MM-DD~MM-DD> <关键词> <积分> [概率]")
+                yield event.plain_result(
+                    "用法: /添加日期奖励 <MM-DD|MM-DD~MM-DD> <关键词> <积分> [概率]"
+                )
                 return
             from ..utils.security import parse_birthday, sanitize_text
+
             date_range = parts[1].strip()
             if "~" in date_range:
                 start_s, end_s = date_range.split("~", 1)
@@ -470,7 +507,9 @@ class AdminHandler:
             logger.error(f"Add date reward error: {e}")
             yield event.plain_result("操作失败")
 
-    async def delete_date_reward(self, event) -> AsyncGenerator[MessageEventResult, None]:
+    async def delete_date_reward(
+        self, event
+    ) -> AsyncGenerator[MessageEventResult, None]:
         if not await self._require_admin(event):
             async for r in self._deny(event):
                 yield r
@@ -489,7 +528,9 @@ class AdminHandler:
             logger.error(f"Delete date reward error: {e}")
             yield event.plain_result("操作失败")
 
-    async def view_date_rewards(self, event) -> AsyncGenerator[MessageEventResult, None]:
+    async def view_date_rewards(
+        self, event
+    ) -> AsyncGenerator[MessageEventResult, None]:
         if not await self._require_admin(event):
             async for r in self._deny(event):
                 yield r
@@ -502,9 +543,11 @@ class AdminHandler:
             lines = ["🎯 日期奖励列表"]
             for r in rows:
                 status = "✅" if r["is_active"] else "❌"
-                range_text = r["start_date"] + (f"~{r['end_date']}" if r["end_date"] else "")
+                range_text = r["start_date"] + (
+                    f"~{r['end_date']}" if r["end_date"] else ""
+                )
                 lines.append(
-                    f"{status} #{r['id']} {range_text} 关键词\"{r['keyword']}\" +{r['points']}积分 概率{r['probability']}"
+                    f'{status} #{r["id"]} {range_text} 关键词"{r["keyword"]}" +{r["points"]}积分 概率{r["probability"]}'
                 )
             yield event.plain_result("\n".join(lines))
         except Exception as e:
@@ -513,7 +556,9 @@ class AdminHandler:
 
     # ─── 数据清空（验证码二次确认） ─────────────────────────
 
-    async def clear_data(self, event, scope: str) -> AsyncGenerator[MessageEventResult, None]:
+    async def clear_data(
+        self, event, scope: str
+    ) -> AsyncGenerator[MessageEventResult, None]:
         """发起清空操作：生成验证码令牌，等待 /确认清空 完成。"""
         if scope == "group":
             if not await self._require_admin(event):
@@ -524,7 +569,7 @@ class AdminHandler:
             if not group_id:
                 yield event.plain_result("仅支持在群聊中清空本群数据")
                 return
-            scope_desc = "本群积分数据（用户、积分、流水、抽奖/兑换记录、口令等）"
+            scope_desc = "本群成员的积分余额与流水记录（成员关系保留）"
         else:
             if not event.is_admin():
                 yield event.plain_result("仅 AstrBot 全局管理员可执行全局清空")
@@ -558,7 +603,9 @@ class AdminHandler:
             self._prune_pending_clears(keep=qq)
             pending = self._pending_clears.pop(qq, None)
             if not pending:
-                yield event.plain_result("没有待确认的清空操作，请先发起 /清空数据 或 /清空全部数据")
+                yield event.plain_result(
+                    "没有待确认的清空操作，请先发起 /清空数据 或 /清空全部数据"
+                )
                 return
             if time.time() > pending["expires_at"]:
                 yield event.plain_result("验证码已过期，请重新发起清空操作")
@@ -573,6 +620,7 @@ class AdminHandler:
 
             # 1. 清空前自动备份（不依赖 backup_dirs 配置）
             from pathlib import Path
+
             backup_dir = Path(self._plugin.db.db_path).parent / "backup_before_clear"
             try:
                 backup_path = await self._plugin.backup_service.backup_unique(
@@ -588,16 +636,25 @@ class AdminHandler:
             # 3. 事务内删除
             counts = await self._do_clear(scope, group_id)
 
-            lines = [
-                f"✅ 已清空{'本群' if scope == 'group' else '全部'}数据：",
-                f"  · 用户 {counts.get('users', 0)}，流水 {counts.get('point_transactions', 0)} 条",
-                f"  · 签到 {counts.get('sign_in_log', 0)}，抽奖 {counts.get('lottery_record', 0)}，兑换 {counts.get('redeem_records', 0)}",
-                f"  · 恢复群名片 {restored} 人（尽力而为）",
-            ]
-            if scope == "global":
+            lines = [f"✅ 已清空{'本群' if scope == 'group' else '全部'}数据："]
+            if scope == "group":
+                lines.append(
+                    f"  · 清零本群成员共享积分 {counts.get('accounts_reset', 0)} 人"
+                )
+                lines.append(
+                    f"  · 流水 {counts.get('point_transactions', 0)} 条，签到 {counts.get('sign_in_log', 0)}，抽奖 {counts.get('lottery_record', 0)}，兑换 {counts.get('redeem_records', 0)}"
+                )
+            else:
+                lines.append(
+                    f"  · 用户 {counts.get('users', 0)}，账户 {counts.get('accounts', 0)}，流水 {counts.get('point_transactions', 0)} 条"
+                )
+                lines.append(
+                    f"  · 签到 {counts.get('sign_in_log', 0)}，抽奖 {counts.get('lottery_record', 0)}，兑换 {counts.get('redeem_records', 0)}"
+                )
                 lines.append(
                     f"  · 物品 {counts.get('redeem_items', 0)}，日期奖励 {counts.get('date_rewards', 0)}，管理员 {counts.get('admins', 0)}，口令 {counts.get('daily_keyword', 0)}"
                 )
+            lines.append(f"  · 恢复群名片 {restored} 人（尽力而为）")
             lines.append(
                 f"清空前备份: {backup_path}"
                 if backup_path
@@ -609,17 +666,32 @@ class AdminHandler:
             yield event.plain_result("操作失败，已记录错误")
 
     async def _do_clear(self, scope: str, group_id: str | None) -> dict:
-        tables = _GROUP_CLEAR_TABLES if scope == "group" else _GLOBAL_CLEAR_TABLES
         counts: dict[str, int] = {}
 
         async def _tx(conn):
-            for table in tables:
-                if group_id:
+            if scope == "group":
+                # 1. 清零本群成员的共享积分与签到状态（积分全局共享，跨群余额同步归零）
+                async with conn.execute(
+                    "UPDATE accounts SET points=0, total_earned=0, last_sign_date=NULL, "
+                    "consecutive_days=0, total_sign_days=0, updated_at=datetime('now','localtime') "
+                    "WHERE qq IN (SELECT qq FROM users WHERE group_id=?)",
+                    (group_id,),
+                ) as cur:
+                    counts["accounts_reset"] = cur.rowcount
+                # 2. 群级记录
+                for table in _GROUP_CLEAR_TABLES:
                     async with conn.execute(
                         f"DELETE FROM {table} WHERE group_id=?", (group_id,)
                     ) as cur:
                         counts[table] = cur.rowcount
-                else:
+                # 3. 成员关系保留，负分头衔显式收尾（余额已归零）
+                async with conn.execute(
+                    "UPDATE users SET negative_title_id=NULL, negative_title_prev_card=NULL WHERE group_id=?",
+                    (group_id,),
+                ) as cur:
+                    counts["title_cleared"] = cur.rowcount
+            else:
+                for table in _GLOBAL_CLEAR_TABLES:
                     async with conn.execute(f"DELETE FROM {table}") as cur:
                         counts[table] = cur.rowcount
 

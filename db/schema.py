@@ -1,25 +1,31 @@
 from astrbot.api import logger
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SQL_CREATE_TABLES = r"""
 
-CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    qq TEXT NOT NULL,
-    group_id TEXT NOT NULL,
+CREATE TABLE IF NOT EXISTS accounts (
+    qq TEXT PRIMARY KEY,
     platform TEXT NOT NULL DEFAULT '',
     points INTEGER NOT NULL DEFAULT 0,
     total_earned INTEGER NOT NULL DEFAULT 0,
     last_sign_date TEXT,
     consecutive_days INTEGER NOT NULL DEFAULT 0,
-    max_consecutive_days INTEGER NOT NULL DEFAULT 0,
     total_sign_days INTEGER NOT NULL DEFAULT 0,
     birthday TEXT,
     birthday_year INTEGER,
-    birthday_bonus_claimed INTEGER NOT NULL DEFAULT 0,
     lucky_pity INTEGER NOT NULL DEFAULT 0,
     unlucky_pity INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_accounts_points ON accounts(points DESC);
+
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    qq TEXT NOT NULL,
+    group_id TEXT NOT NULL,
     negative_title_id INTEGER,
     negative_title_prev_card TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
@@ -27,7 +33,6 @@ CREATE TABLE IF NOT EXISTS users (
     UNIQUE(qq, group_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_users_group_points ON users(group_id, points DESC);
 CREATE INDEX IF NOT EXISTS idx_users_qq ON users(qq);
 
 CREATE TABLE IF NOT EXISTS sign_in_log (
@@ -203,6 +208,8 @@ async def init_schema(db_manager):
         await db.commit()
         await _seed_default_easter_events(db)
         await db.commit()
+        await _ensure_sign_in_unique_index(db)
+        await db.commit()
         logger.info("Database schema initialized (version %d).", SCHEMA_VERSION)
     else:
         try:
@@ -238,22 +245,120 @@ async def _table_columns(db, table: str) -> set:
         await cur.close()
 
 
+async def _ensure_sign_in_unique_index(db) -> None:
+    """清理同 (qq, sign_date) 重复签到行后创建全局唯一索引。
+
+    防御历史脏数据：唯一索引要求先无重复，保留最早一条。
+    删除行数 > 0 时告警（全局限签迁移的审计提示）。
+    """
+    cur = await db.execute(
+        "DELETE FROM sign_in_log WHERE id NOT IN "
+        "(SELECT MIN(id) FROM sign_in_log GROUP BY qq, sign_date)"
+    )
+    try:
+        removed = cur.rowcount
+    finally:
+        await cur.close()
+    if removed:
+        logger.warning(
+            "Sign-in dedupe removed %d duplicate row(s) (same qq + sign_date across groups); "
+            "kept the earliest entry per user per day.",
+            removed,
+        )
+    await db.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_sign_in_log_qq_date ON sign_in_log(qq, sign_date)"
+    )
+
+
+# users 表中已迁入 accounts 的旧列（v2 → v3 时逐列删除）
+_USERS_DROPPED_COLUMNS = (
+    "platform",
+    "points",
+    "total_earned",
+    "last_sign_date",
+    "consecutive_days",
+    "max_consecutive_days",
+    "total_sign_days",
+    "birthday",
+    "birthday_year",
+    "birthday_bonus_claimed",
+    "lucky_pity",
+    "unlucky_pity",
+)
+
+
 async def _migrate(db, current_version: int):
     """增量迁移：仅在目标列缺失时执行，保证可重复运行。"""
     if current_version < 2:
         cols = await _table_columns(db, "users")
         if "negative_title_prev_card" not in cols:
-            await db.execute("ALTER TABLE users ADD COLUMN negative_title_prev_card TEXT")
+            await db.execute(
+                "ALTER TABLE users ADD COLUMN negative_title_prev_card TEXT"
+            )
         cols = await _table_columns(db, "point_transactions")
         if "admin_qq" not in cols:
             await db.execute("ALTER TABLE point_transactions ADD COLUMN admin_qq TEXT")
         await db.commit()
 
+    if current_version < 3:
+        await _migrate_v3(db)
+
+
+async def _migrate_v3(db) -> None:
+    """v2 → v3：积分改为一号跨群共享。
+
+    1. 新建 accounts（按 QQ 全局账户），从 users 按 QQ 聚合回填；
+    2. 清理 sign_in_log 重复行并建全局唯一索引；
+    3. 删除 users 中已迁出的列。
+    """
+    user_cols = await _table_columns(db, "users")
+
+    # accounts 表已由 SQL_CREATE_TABLES 保证存在（幂等）
+    # 多群余额合并策略：MAX（旧系统按全局复制，各群一致，MAX 保守无膨胀）
+    if "points" in user_cols:
+        await db.execute(
+            "INSERT OR IGNORE INTO accounts (qq, platform, points, total_earned, last_sign_date, "
+            "consecutive_days, total_sign_days, birthday, birthday_year, lucky_pity, unlucky_pity) "
+            "SELECT u.qq, "
+            "COALESCE((SELECT platform FROM users u2 WHERE u2.qq=u.qq AND u2.platform!='' "
+            "ORDER BY u2.updated_at DESC LIMIT 1), ''), "
+            "MAX(u.points), MAX(u.total_earned), MAX(u.last_sign_date), MAX(u.consecutive_days), "
+            "MAX(u.total_sign_days), "
+            "(SELECT birthday FROM users u2 WHERE u2.qq=u.qq AND u2.birthday IS NOT NULL LIMIT 1), "
+            "(SELECT birthday_year FROM users u2 WHERE u2.qq=u.qq AND u2.birthday_year IS NOT NULL LIMIT 1), "
+            "MAX(u.lucky_pity), MAX(u.unlucky_pity) "
+            "FROM users u GROUP BY u.qq"
+        )
+
+    await _ensure_sign_in_unique_index(db)
+
+    await db.execute("DROP INDEX IF EXISTS idx_users_group_points")
+    for col in _USERS_DROPPED_COLUMNS:
+        if col in user_cols:
+            await db.execute(f"ALTER TABLE users DROP COLUMN {col}")
+    await db.commit()
+
 
 async def _seed_default_easter_events(db):
     events = [
-        ("lucky", "\u6b27\u7687\u964d\u4e34", "\u7b7e\u5230\u89e6\u53d1\u6b27\u7687\u4e8b\u4ef6\uff0c\u83b7\u5f97\u5927\u91cf\u79ef\u5206\uff01", 0.02, 50, 200, 10),
-        ("unlucky", "\u975e\u8457\u9644\u4f53", "\u7b7e\u5230\u89e6\u53d1\u975e\u8457\u4e8b\u4ef6\uff0c\u4e22\u5931\u5927\u91cf\u79ef\u5206\u2026", 0.03, -200, -50, 15),
+        (
+            "lucky",
+            "\u6b27\u7687\u964d\u4e34",
+            "\u7b7e\u5230\u89e6\u53d1\u6b27\u7687\u4e8b\u4ef6\uff0c\u83b7\u5f97\u5927\u91cf\u79ef\u5206\uff01",
+            0.02,
+            50,
+            200,
+            10,
+        ),
+        (
+            "unlucky",
+            "\u975e\u8457\u9644\u4f53",
+            "\u7b7e\u5230\u89e6\u53d1\u975e\u8457\u4e8b\u4ef6\uff0c\u4e22\u5931\u5927\u91cf\u79ef\u5206\u2026",
+            0.03,
+            -200,
+            -50,
+            15,
+        ),
     ]
     # 不在函数内提交：由调用方在同一事务内完成，或在其后显式 commit
     for ev in events:

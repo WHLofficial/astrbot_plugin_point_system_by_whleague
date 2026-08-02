@@ -75,16 +75,15 @@ async def _stack(t, overrides=None):
 
 
 async def _assert_reconcile(t, seeds: dict):
-    """全局余额对账不变量：points == 初始注入 + Σ流水。"""
-    rows = await t.db.fetchall(
-        "SELECT u.qq, u.group_id, u.points, "
-        "COALESCE((SELECT SUM(pt.amount) FROM point_transactions pt "
-        "WHERE pt.qq=u.qq AND pt.group_id=u.group_id), 0) AS flow "
-        "FROM users u"
+    """全局余额对账不变量：accounts.points == 初始注入 + Σ全群流水。"""
+    accounts = await t.db.fetchall("SELECT qq, points FROM accounts")
+    flows = await t.db.fetchall(
+        "SELECT qq, SUM(amount) AS s FROM point_transactions GROUP BY qq"
     )
-    for r in rows:
-        expected = seeds.get((r["qq"], r["group_id"]), 0) + r["flow"]
-        assert r["points"] == expected, (r["qq"], r["points"], expected, r["flow"])
+    flow_map = {r["qq"]: r["s"] for r in flows}
+    for r in accounts:
+        expected = seeds.get(r["qq"], 0) + flow_map.get(r["qq"], 0)
+        assert r["points"] == expected, (r["qq"], r["points"], expected)
 
 
 async def test_stress_mixed_concurrency_reconcile():
@@ -94,10 +93,12 @@ async def test_stress_mixed_concurrency_reconcile():
         seeds = {}
         for i in range(30):
             await t.db.execute(
-                "INSERT INTO users (qq, group_id, points) VALUES (?,?,100)",
-                (f"u{i}", "G1"),
+                "INSERT INTO accounts (qq, points) VALUES (?,100)", (f"u{i}",)
             )
-            seeds[(f"u{i}", "G1")] = 100
+            await t.db.execute(
+                "INSERT INTO users (qq, group_id) VALUES (?,?)", (f"u{i}", "G1")
+            )
+            seeds[f"u{i}"] = 100
         await t.dao.set_daily_keyword("G1", "红包", 1, "admin")
         item_id = await t.dao.add_item("商品", 1, -1)
 
@@ -146,8 +147,10 @@ async def test_soak_multi_day():
         )
         for i in range(3):
             await t.db.execute(
-                "INSERT INTO users (qq, group_id, points) VALUES (?,?,100)",
-                (f"u{i}", "G1"),
+                "INSERT INTO accounts (qq, points) VALUES (?,100)", (f"u{i}",)
+            )
+            await t.db.execute(
+                "INSERT INTO users (qq, group_id) VALUES (?,?)", (f"u{i}", "G1")
             )
         await t.dao.set_daily_keyword("G1", "红包", 1, "admin")
 
@@ -179,7 +182,8 @@ async def test_soak_multi_day():
                     datetime.strptime(today_str(), "%Y-%m-%d") - timedelta(days=1)
                 ).strftime("%Y-%m-%d")
                 await t.db.execute(
-                    "UPDATE users SET last_sign_date=? WHERE group_id='G1'",
+                    "UPDATE accounts SET last_sign_date=? "
+                    "WHERE qq IN (SELECT qq FROM users WHERE group_id='G1')",
                     (yesterday,),
                 )
                 await t.db.execute("DELETE FROM sign_in_log")
@@ -218,10 +222,12 @@ async def test_random_op_fuzz():
         seeds = {}
         for i in range(50):
             await t.db.execute(
-                "INSERT INTO users (qq, group_id, points) VALUES (?,?,100)",
-                (f"u{i}", "G1"),
+                "INSERT INTO accounts (qq, points) VALUES (?,100)", (f"u{i}",)
             )
-            seeds[(f"u{i}", "G1")] = 100
+            await t.db.execute(
+                "INSERT INTO users (qq, group_id) VALUES (?,?)", (f"u{i}", "G1")
+            )
+            seeds[f"u{i}"] = 100
         item_id = await t.dao.add_item("商品", 1, -1)
         await t.dao.set_daily_keyword("G1", "红包", 1, "admin")
 

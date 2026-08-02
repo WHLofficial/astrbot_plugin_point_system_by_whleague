@@ -36,27 +36,27 @@ async def test_backup_restore_consistency():
 
         svc = BackupService(t.db, {"backup_dirs": []})
         await t.db.execute(
-            "INSERT INTO users (qq, group_id, points) VALUES ('u1','G1',10)"
+            "INSERT INTO accounts (qq, points) VALUES ('u1',10)"
         )
         await t.db.execute(
-            "INSERT INTO users (qq, group_id, points) VALUES ('u2','G1',20)"
+            "INSERT INTO accounts (qq, points) VALUES ('u2',20)"
         )
         dst = Path(tempfile.mkdtemp(prefix="bak_restore_"))
         bak = await svc.backup_unique(dst)
         # 备份后源库继续写入
         await t.db.execute(
-            "INSERT INTO users (qq, group_id, points) VALUES ('u3','G1',30)"
+            "INSERT INTO accounts (qq, points) VALUES ('u3',30)"
         )
         # 快照不包含新写入（一致性快照）
         async with aiosqlite.connect(bak) as conn:
             conn.row_factory = aiosqlite.Row
             row = await (
-                await conn.execute("SELECT COUNT(*) AS c FROM users")
+                await conn.execute("SELECT COUNT(*) AS c FROM accounts")
             ).fetchone()
             assert row["c"] == 2
             # 数据内容一致
             row = await (
-                await conn.execute("SELECT points FROM users WHERE qq='u2'")
+                await conn.execute("SELECT points FROM accounts WHERE qq='u2'")
             ).fetchone()
             assert row["points"] == 20
     return "备份恢复：快照重开数据一致、不包含备份后写入"
@@ -93,9 +93,9 @@ async def test_source_writable_after_backup():
         await svc.run_backup()  # 空 targets 跳过不报错
         await svc.backup_unique(Path(tempfile.mkdtemp(prefix="bak_wr_")))
         await t.db.execute(
-            "INSERT INTO users (qq, group_id, points) VALUES ('u1','G1',1)"
+            "INSERT INTO accounts (qq, points) VALUES ('u1',1)"
         )
-        assert await t.count("users") == 1
+        assert await t.count("accounts") == 1
     return "备份：空目录跳过、备份后源库可写"
 
 

@@ -132,15 +132,15 @@ async def test_easter_signin_lucky_integration():
         )
         with patch_random(random=0.01, randint=100):
             r = await svc.sign_in("u1", "G1", "aiocqhttp", "签到")
-        # 基础10+首签50+日首签30+连签5+彩蛋100 = 195
-        assert r["points"] == 195, r["points"]
-        row = await t.dao.get_user("u1", "G1")
-        assert row["points"] == 195 and row["total_earned"] == 195
+        # 基础10+首签50+日首签30+连签0(第1天无加成)+彩蛋100 = 190
+        assert r["points"] == 190, r["points"]
+        row = await t.dao.get_account("u1")
+        assert row["points"] == 190 and row["total_earned"] == 190
         log = await t.db.fetchone(
             "SELECT easter_event_type, easter_points, points_earned FROM sign_in_log WHERE qq='u1'"
         )
         assert log["easter_event_type"] == "lucky" and log["easter_points"] == 100
-        assert log["points_earned"] == 195
+        assert log["points_earned"] == 190
     return "签到×彩蛋：lucky 正事件入账一致"
 
 
@@ -179,15 +179,16 @@ async def test_easter_signin_unlucky_integration():
         )
         with patch_random(random=0.025, randint=-100):
             r = await svc.sign_in("u1", "G1", "aiocqhttp", "签到")
-        # 基础95 + 负彩蛋-100 = -5
-        assert r["points"] == -5, r["points"]
-        # 负总积分显示格式：-5 而非 "+-5"
-        assert "获得 -5 积分" in r["msg"], r["msg"]
-        assert "+-5" not in r["msg"]
-        row = await t.dao.get_user("u1", "G1")
-        # 非酋负事件不计入累计获得：total_earned = 95
-        assert row["points"] == -5 and row["total_earned"] == 95
+        # 基础90(连签0) + 负彩蛋-100 = -10
+        assert r["points"] == -10, r["points"]
+        # 负总积分显示格式：-10 而非 "+-10"
+        assert "获得 -10 积分" in r["msg"], r["msg"]
+        assert "+-10" not in r["msg"]
+        acct = await t.dao.get_account("u1")
+        # 非酋负事件不计入累计获得：total_earned = 90
+        assert acct["points"] == -10 and acct["total_earned"] == 90
         # 负余额自动补发负分头衔
+        row = await t.dao.get_user("u1", "G1")
         assert row["negative_title_id"] == 1
         log = await t.db.fetchone(
             "SELECT easter_event_type, easter_points FROM sign_in_log WHERE qq='u1'"
@@ -272,9 +273,9 @@ async def test_date_reward_signin_integration():
             cfg,
         )
         r = await svc.sign_in("u1", "G1", "aiocqhttp", "龙年大吉")
-        assert r["points"] == 95 + 30, r["points"]
+        assert r["points"] == 90 + 30, r["points"]
         log = await t.db.fetchone("SELECT points_earned FROM sign_in_log WHERE qq='u1'")
-        assert log["points_earned"] == 125
+        assert log["points_earned"] == 120
     return "签到×日期奖励：消息命中关键词加分入账"
 
 

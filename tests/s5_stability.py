@@ -50,14 +50,14 @@ async def test_transaction_rollback():
     """事务中途异常：全部回滚，数据一致。"""
     async with TempDB() as t:
         await t.db.execute(
-            "INSERT INTO users (qq, group_id, points) VALUES ('u1','G1',10)"
+            "INSERT INTO accounts (qq, points) VALUES ('u1',10)"
         )
 
         async def bad_tx(conn):
             await conn.execute(
-                "INSERT INTO users (qq, group_id, points) VALUES ('u2','G1',20)"
+                "INSERT INTO accounts (qq, points) VALUES ('u2',20)"
             )
-            await conn.execute("UPDATE users SET points=points-100 WHERE qq='u1'")
+            await conn.execute("UPDATE accounts SET points=points-100 WHERE qq='u1'")
             raise RuntimeError("boom")
 
         try:
@@ -66,8 +66,8 @@ async def test_transaction_rollback():
         except RuntimeError:
             pass
 
-        assert await t.count("users") == 1  # u2 未插入
-        row = await t.dao.get_user("u1", "G1")
+        assert await t.count("accounts") == 1  # u2 未插入
+        row = await t.dao.get_account("u1")
         assert row["points"] == 10  # 扣减未生效
     return "事务回滚：异常后无部分写入"
 
@@ -84,7 +84,7 @@ async def test_busy_retry():
             async def writer():
                 await asyncio.sleep(0.3)
                 await t.db.execute(
-                    "INSERT INTO users (qq, group_id, points) VALUES ('u1','G1',1)"
+                    "INSERT INTO accounts (qq, points) VALUES ('u1',1)"
                 )
 
             async def unlocker():
@@ -94,7 +94,7 @@ async def test_busy_retry():
             await asyncio.gather(writer(), unlocker())
             elapsed = asyncio.get_event_loop().time() - start
             assert elapsed < 5, elapsed  # busy_timeout 5s 内完成
-            assert await t.count("users") == 1
+            assert await t.count("accounts") == 1
         finally:
             try:
                 await blocker.execute("ROLLBACK")
@@ -113,13 +113,13 @@ async def test_reload_cycles():
         await db.init()
         await init_schema(db)
         await db.execute(
-            "INSERT INTO users (qq, group_id, points) VALUES (?,?,1)", (f"u{i}", "G1")
+            "INSERT INTO accounts (qq, points) VALUES (?,1)", (f"u{i}",)
         )
         await db.close()
         assert db._conn is None
     db = DatabaseManager(path)
     await db.init()
-    row = await db.fetchone("SELECT COUNT(*) AS c FROM users")
+    row = await db.fetchone("SELECT COUNT(*) AS c FROM accounts")
     assert row and row["c"] == 10
     await db.close()
     return "重载循环 ×10：连接正确释放、数据持久"
@@ -159,12 +159,12 @@ async def test_wal_crash_recovery():
     db1 = DatabaseManager(path)
     await db1.init()
     await init_schema(db1)
-    await db1.execute("INSERT INTO users (qq, group_id, points) VALUES ('u1','G1',42)")
+    await db1.execute("INSERT INTO accounts (qq, points) VALUES ('u1',42)")
     # 不关闭 db1（模拟崩溃），直接另开连接读取
     db2 = DatabaseManager(path)
     await db2.init()
     try:
-        row = await db2.fetchone("SELECT points FROM users WHERE qq='u1'")
+        row = await db2.fetchone("SELECT points FROM accounts WHERE qq='u1'")
         assert row and row["points"] == 42
     finally:
         await db2.close()

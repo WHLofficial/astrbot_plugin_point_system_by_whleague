@@ -42,18 +42,18 @@ async def test_signin_fixed_mode():
 
         r = await svc.sign_in("u1", "G1", "aiocqhttp", "签到")
         assert not r["already_signed"]
-        # 固定 10 + 首次 50 + 每日首签 30 + 连签 5 = 95
-        assert r["points"] == 95, r["points"]
+        # 固定 10 + 首次 50 + 每日首签 30 + 连签(第1天无加成) 0 = 90
+        assert r["points"] == 90, r["points"]
         # 同日再签被拒
         r2 = await svc.sign_in("u1", "G1", "aiocqhttp", "签到")
         assert r2["already_signed"]
-        # 流水入账
+        # 流水入账（accounts 全局账户）
         row = await t.db.fetchone(
-            "SELECT points, total_earned, total_sign_days FROM users WHERE qq='u1' AND group_id='G1'"
+            "SELECT points, total_earned, total_sign_days FROM accounts WHERE qq='u1'"
         )
         assert (
-            row["points"] == 95
-            and row["total_earned"] == 95
+            row["points"] == 90
+            and row["total_earned"] == 90
             and row["total_sign_days"] == 1
         )
     return "固定模式签到：首次奖励/连签/去重/入账一致"
@@ -132,13 +132,13 @@ async def test_signin_day_first_and_streak():
             cfg,
         )
         r = await svc.sign_in("a", "G1", "aiocqhttp", "签到")
-        assert r["points"] == 10 + 30 + 5, r  # 基础 10 + 每日首签 30 + 连签第1天 5
+        assert r["points"] == 10 + 30 + 0, r  # 基础 10 + 每日首签 30 + 连签第1天无加成
         r = await svc.sign_in("b", "G1", "aiocqhttp", "签到")
-        assert r["points"] == 10 + 5, r  # 非首签：基础 10 + 连签第1天 5
+        assert r["points"] == 10 + 0, r  # 非首签：基础 10 + 连签第1天无加成
         # 断签：旧日期 → 连签重置为 1
         await t.db.execute("DELETE FROM sign_in_log WHERE qq='a' AND group_id='G1'")
         await t.db.execute(
-            "UPDATE users SET last_sign_date=?, consecutive_days=2 WHERE qq='a' AND group_id='G1'",
+            "UPDATE accounts SET last_sign_date=?, consecutive_days=2 WHERE qq='a'",
             ("2020-01-01",),
         )
         r = await svc.sign_in("a", "G1", "aiocqhttp", "签到")
@@ -153,12 +153,12 @@ async def test_signin_day_first_and_streak():
             datetime.strptime(today_str(), "%Y-%m-%d") - timedelta(days=1)
         ).strftime("%Y-%m-%d")
         await t.db.execute(
-            "UPDATE users SET last_sign_date=?, consecutive_days=6 WHERE qq='a' AND group_id='G1'",
+            "UPDATE accounts SET last_sign_date=?, consecutive_days=6 WHERE qq='a'",
             (yesterday,),
         )
         r = await svc.sign_in("a", "G1", "aiocqhttp", "签到")
         assert r["consecutive"] == 7, r
-        assert r["points"] == 10 + 7 * 5 + 100, r["points"]  # 基础+连签+周奖励
+        assert r["points"] == 10 + 6 * 5 + 100, r["points"]  # 基础+连签(第7天=6×5)+周奖励
     return "每日首签奖励唯一 / 连签断签重置 / 周奖励"
 
 
@@ -214,7 +214,7 @@ async def test_lottery_tiers_and_limit():
         ps = PointService(t.db, t.dao)
         svc = LotteryService(t.db, t.dao, ps, cfg)
         await t.db.execute(
-            "INSERT INTO users (qq, group_id, points) VALUES ('u1','G1',10000)"
+            "INSERT INTO accounts (qq, points) VALUES ('u1',10000)"
         )
         ok = 0
         for _ in range(8):
@@ -228,7 +228,7 @@ async def test_lottery_tiers_and_limit():
         assert not r["success"]
         # 负分拦截
         cfg["lottery_enabled"] = True
-        await t.db.execute("UPDATE users SET points=-1 WHERE qq='u1' AND group_id='G1'")
+        await t.db.execute("UPDATE accounts SET points=-1 WHERE qq='u1'")
         r = await svc.draw("u1", "G1")
         assert not r["success"]
     return "抽奖：每日限额/开关/负分拦截"
@@ -247,7 +247,7 @@ async def test_redeem_stock_discount_verify():
         svc = RedeemService(t.db, t.dao, ps)
         item_id = await t.dao.add_item("商品A", 100, 2)
         await t.db.execute(
-            "INSERT INTO users (qq, group_id, points) VALUES ('u1','G1',500)"
+            "INSERT INTO accounts (qq, points) VALUES ('u1',500)"
         )
         r = await svc.redeem("u1", "G1", item_id, 2)
         assert r["success"], r
@@ -297,7 +297,7 @@ async def test_daily_keyword():
         assert r.get("already") is True
         # 负分拦截（未领取过口令的新负分用户）
         await t.db.execute(
-            "INSERT INTO users (qq, group_id, points) VALUES ('u3','G1',-5)"
+            "INSERT INTO accounts (qq, points) VALUES ('u3',-5)"
         )
         r = await svc.check_and_claim("u3", "G1", "红包")
         assert r.get("blocked") is True
@@ -317,8 +317,12 @@ async def test_ranking_stats():
 
         for i in range(5):
             await t.db.execute(
-                "INSERT INTO users (qq, group_id, points) VALUES (?,?,?)",
-                (f"u{i}", "G1", 100 - i * 10),
+                "INSERT INTO accounts (qq, points) VALUES (?,?)",
+                (f"u{i}", 100 - i * 10),
+            )
+            await t.db.execute(
+                "INSERT INTO users (qq, group_id) VALUES (?,?)",
+                (f"u{i}", "G1"),
             )
         svc = RankingService(t.dao)
         r = await svc.get_ranking("G1")
@@ -338,7 +342,10 @@ async def test_negative_title_lifecycle():
 
         ps = PointService(t.db, t.dao)
         await t.db.execute(
-            "INSERT INTO users (qq, group_id, points) VALUES ('u1','G1',-10)"
+            "INSERT INTO accounts (qq, points) VALUES ('u1',-10)"
+        )
+        await t.db.execute(
+            "INSERT INTO users (qq, group_id) VALUES ('u1','G1')"
         )
         # bot=None：仅维护 DB 状态
         new_id = await ps.ensure_negative_title("u1", "G1", bot=None)
@@ -346,7 +353,7 @@ async def test_negative_title_lifecycle():
         row = await t.dao.get_user("u1", "G1")
         assert row["negative_title_id"] == 1
         # 回正清除
-        await t.db.execute("UPDATE users SET points=5 WHERE qq='u1' AND group_id='G1'")
+        await t.db.execute("UPDATE accounts SET points=5 WHERE qq='u1'")
         r = await ps.ensure_negative_title("u1", "G1", bot=None)
         assert r is None
         row = await t.dao.get_user("u1", "G1")
@@ -454,7 +461,10 @@ async def test_clear_feature_regression():
         )
         handler = AdminHandler(plugin)
         await t.db.execute(
-            "INSERT INTO users (qq, group_id, points) VALUES ('u1','G1',10)"
+            "INSERT INTO accounts (qq, points) VALUES ('u1',10)"
+        )
+        await t.db.execute(
+            "INSERT INTO users (qq, group_id) VALUES ('u1','G1')"
         )
         ev = FakeEvent("admin", "G1", is_admin=True)
         msgs = await collect(handler.clear_data(ev, "group"))
@@ -463,7 +473,10 @@ async def test_clear_feature_regression():
         ev2 = FakeEvent("admin", "G1", is_admin=True, msg=f"/确认清空 {token}")
         msgs = await collect(handler.confirm_clear(ev2))
         assert any("已清空本群数据" in m for m in msgs)
-        assert await t.count("users") == 0
+        # 群清空：成员积分归零、成员关系保留
+        assert await t.count("users") == 1
+        row = await t.db.fetchone("SELECT points FROM accounts WHERE qq='u1'")
+        assert row["points"] == 0
         # 权限
         ev3 = FakeEvent("member", "G1", is_admin=False)
         msgs = await collect(handler.clear_data(ev3, "global"))

@@ -47,8 +47,8 @@ async def test_concurrent_signin_same_user():
         ok = [r for r in results if not r["already_signed"]]
         assert len(ok) == 1, len(ok)
         assert await t.count("sign_in_log") == 1
-        row = await t.dao.get_user("u1", "G1")
-        assert row["total_sign_days"] == 1 and row["points"] == 10 + 50 + 30 + 5
+        row = await t.dao.get_account("u1")
+        assert row["total_sign_days"] == 1 and row["points"] == 10 + 50 + 30 + 0
     return "并发签到同用户：仅 1 次成功"
 
 
@@ -101,13 +101,13 @@ async def test_concurrent_lottery_daily_limit():
         ps = PointService(t.db, t.dao)
         svc = LotteryService(t.db, t.dao, ps, cfg)
         await t.db.execute(
-            "INSERT INTO users (qq, group_id, points) VALUES ('u1','G1',10000)"
+            "INSERT INTO accounts (qq, points) VALUES ('u1',10000)"
         )
         results = await asyncio.gather(*[svc.draw("u1", "G1") for _ in range(50)])
         ok = [r for r in results if r["success"]]
         assert len(ok) == 10, len(ok)
         assert await t.count("lottery_record") == 10
-        row = await t.dao.get_user("u1", "G1")
+        row = await t.dao.get_account("u1")
         assert row["points"] == 10000 - 100
     return "并发抽奖：每日限额恰 10 次"
 
@@ -127,8 +127,10 @@ async def test_concurrent_redeem_last_stock():
         item_id = await t.dao.add_item("限量", 10, 1)
         for i in range(30):
             await t.db.execute(
-                "INSERT INTO users (qq, group_id, points) VALUES (?,?,1000)",
-                (f"u{i}", "G1"),
+                "INSERT INTO accounts (qq, points) VALUES (?,1000)", (f"u{i}",)
+            )
+            await t.db.execute(
+                "INSERT INTO users (qq, group_id) VALUES (?,?)", (f"u{i}", "G1")
             )
         results = await asyncio.gather(
             *[svc.redeem(f"u{i}", "G1", item_id, 1) for i in range(30)]
@@ -174,7 +176,7 @@ async def test_concurrent_points_reconcile():
 
         ps = PointService(t.db, t.dao)
         await t.db.execute(
-            "INSERT INTO users (qq, group_id, points) VALUES ('u1','G1',10000)"
+            "INSERT INTO accounts (qq, points) VALUES ('u1',10000)"
         )
 
         async def add():
@@ -186,7 +188,7 @@ async def test_concurrent_points_reconcile():
         tasks = [add() if i % 2 == 0 else sub() for i in range(200)]
         await asyncio.gather(*tasks)
 
-        row = await t.dao.get_user("u1", "G1")
+        row = await t.dao.get_account("u1")
         flows = await t.db.fetchone(
             "SELECT SUM(amount) AS s FROM point_transactions WHERE qq='u1'"
         )
@@ -205,8 +207,11 @@ async def test_concurrent_negative_title_unique():
         ps = PointService(t.db, t.dao)
         for i in range(10):
             await t.db.execute(
-                "INSERT INTO users (qq, group_id, points, negative_title_prev_card) VALUES (?,?,?,?)",
-                (f"n{i}", "G1", -1, f"卡片{i}"),
+                "INSERT INTO accounts (qq, points) VALUES (?,?)", (f"n{i}", -1)
+            )
+            await t.db.execute(
+                "INSERT INTO users (qq, group_id, negative_title_prev_card) VALUES (?,?,?)",
+                (f"n{i}", "G1", f"卡片{i}"),
             )
         ids = await asyncio.gather(
             *[ps.ensure_negative_title(f"n{i}", "G1", bot=None) for i in range(10)]
@@ -219,13 +224,13 @@ async def test_read_while_write_no_block():
     """读写串行化正确性：写事务进行中，读被锁串行等待，但无脏读、无数据丢失。"""
     async with TempDB() as t:
         await t.db.execute(
-            "INSERT INTO users (qq, group_id, points) VALUES ('u1','G1',1)"
+            "INSERT INTO accounts (qq, points) VALUES ('u1',1)"
         )
 
         async def slow_tx():
             async def _tx(conn):
                 await conn.execute(
-                    "INSERT INTO users (qq, group_id, points) VALUES ('u2','G1',2)"
+                    "INSERT INTO accounts (qq, points) VALUES ('u2',2)"
                 )
                 await asyncio.sleep(0.4)  # 模拟慢事务
 
@@ -234,7 +239,7 @@ async def test_read_while_write_no_block():
         async def reader():
             await asyncio.sleep(0.1)  # 事务已开始
             started = asyncio.get_event_loop().time()
-            rows = await t.db.fetchall("SELECT qq FROM users")
+            rows = await t.db.fetchall("SELECT qq FROM accounts")
             elapsed = asyncio.get_event_loop().time() - started
             return elapsed, {r["qq"] for r in rows}
 
@@ -269,7 +274,10 @@ async def test_concurrent_clear_confirm_single_use():
         )
         handler = AdminHandler(plugin)
         await t.db.execute(
-            "INSERT INTO users (qq, group_id, points) VALUES ('u1','G1',1)"
+            "INSERT INTO accounts (qq, points) VALUES ('u1',1)"
+        )
+        await t.db.execute(
+            "INSERT INTO users (qq, group_id) VALUES ('u1','G1')"
         )
 
         ev = FakeEvent("admin", "G1", is_admin=True)
@@ -283,7 +291,10 @@ async def test_concurrent_clear_confirm_single_use():
         results = await asyncio.gather(confirm(), confirm())
         executed = [r for r in results if any("已清空本群数据" in m for m in r)]
         assert len(executed) == 1, list(results)
-        assert await t.count("users") == 0
+        # 群清空：成员关系保留，积分归零
+        assert await t.count("users") == 1
+        row = await t.db.fetchone("SELECT points FROM accounts WHERE qq='u1'")
+        assert row["points"] == 0
     return "并发确认清空：令牌单次性保证仅 1 次执行"
 
 
@@ -302,8 +313,10 @@ async def test_concurrent_redeem_record_no_unique():
         item_id = await t.dao.add_item("无限", 1, -1)
         for i in range(30):
             await t.db.execute(
-                "INSERT INTO users (qq, group_id, points) VALUES (?,?,1000)",
-                (f"u{i}", "G1"),
+                "INSERT INTO accounts (qq, points) VALUES (?,1000)", (f"u{i}",)
+            )
+            await t.db.execute(
+                "INSERT INTO users (qq, group_id) VALUES (?,?)", (f"u{i}", "G1")
             )
         results = await asyncio.gather(
             *[svc.redeem(f"u{i}", "G1", item_id, 1) for i in range(30)]

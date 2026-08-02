@@ -1,4 +1,4 @@
-"""S15 迁移：schema v1→v2 加列迁移与幂等、legacy 配置迁移（_load_config_cache first_deploy）。"""
+"""S15 迁移：schema v1→v3 全链路迁移与幂等、legacy 配置迁移（_load_config_cache first_deploy）。"""
 
 import os
 import tempfile
@@ -6,7 +6,7 @@ import tempfile
 from .common import TempDB, base_cfg
 
 
-async def test_schema_v1_to_v2_migration():
+async def test_schema_v1_to_v3_migration():
     tmp = tempfile.mkdtemp(prefix="points_mig_")
     path = os.path.join(tmp, "mig.db")
     from astrbot_plugin_point_system_by_whleague.db.connection import DatabaseManager
@@ -18,7 +18,8 @@ async def test_schema_v1_to_v2_migration():
     db = DatabaseManager(path)
     await db.init()
     try:
-        # 构造 v1 schema：users 缺 negative_title_prev_card、point_transactions 缺 admin_qq
+        # 构造 v1 schema：users 缺 negative_title_prev_card、point_transactions 缺 admin_qq，
+        # users 含旧积分字段（points 等），sign_in_log 含同 (qq, sign_date) 跨群重复行
         await db.conn.executescript(
             """
             CREATE TABLE users (
@@ -47,33 +48,79 @@ async def test_schema_v1_to_v2_migration():
                 reason TEXT NOT NULL, ref_id INTEGER,
                 created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
             );
+            CREATE TABLE sign_in_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                qq TEXT NOT NULL, group_id TEXT NOT NULL,
+                sign_date TEXT NOT NULL,
+                points_earned INTEGER NOT NULL DEFAULT 0,
+                base_points INTEGER NOT NULL DEFAULT 0,
+                bonus_first_sign INTEGER NOT NULL DEFAULT 0,
+                bonus_day_first INTEGER NOT NULL DEFAULT 0,
+                bonus_consecutive INTEGER NOT NULL DEFAULT 0,
+                bonus_weekly INTEGER NOT NULL DEFAULT 0,
+                easter_event_type TEXT,
+                easter_points INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+                UNIQUE(qq, group_id, sign_date)
+            );
             CREATE TABLE plugin_config (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL,
                 updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
             );
             INSERT INTO plugin_config (key, value) VALUES ('schema_version', '1');
-            INSERT INTO users (qq, group_id, points) VALUES ('u1','G1',5);
+            INSERT INTO users (qq, group_id, points) VALUES
+                ('u1','G1',5),('u1','G2',5),('u2','G1',7);
+            INSERT INTO sign_in_log (qq, group_id, sign_date, points_earned) VALUES
+                ('u1','G1','2026-08-01',10),
+                ('u1','G2','2026-08-01',10),
+                ('u1','G1','2026-08-02',10);
             """
         )
         await db.conn.commit()
         await init_schema(db)
-        # 迁移后：版本号升级、目标列存在、数据保留
+        # 版本号升级到当前
         row = await db.fetchone(
             "SELECT value FROM plugin_config WHERE key='schema_version'"
         )
         assert row["value"] == str(SCHEMA_VERSION)
+        # v2 加列迁移
         for table, col in (
             ("users", "negative_title_prev_card"),
             ("point_transactions", "admin_qq"),
         ):
             cols = await db.fetchall(f"PRAGMA table_info({table})")
             assert col in {c["name"] for c in cols}, (table, col)
-        row = await db.fetchone("SELECT points FROM users WHERE qq='u1'")
-        assert row["points"] == 5
+        # v3：accounts 回填（多群余额取 MAX，total_earned 原值）
+        acct = await db.fetchone(
+            "SELECT points, total_earned FROM accounts WHERE qq='u1'"
+        )
+        assert acct["points"] == 5 and acct["total_earned"] == 0
+        # users 旧列已删除（瘦身）
+        cols = await db.fetchall("PRAGMA table_info(users)")
+        names = {c["name"] for c in cols}
+        for dropped in (
+            "points", "platform", "total_earned", "last_sign_date",
+            "consecutive_days", "max_consecutive_days", "total_sign_days",
+            "birthday", "birthday_year", "birthday_bonus_claimed",
+            "lucky_pity", "unlucky_pity",
+        ):
+            assert dropped not in names, dropped
+        # 全局唯一索引：同 (qq, sign_date) 重复行被清理（保留最早一条）
+        cnt = await db.fetchone("SELECT COUNT(*) AS c FROM sign_in_log")
+        assert cnt["c"] == 2, cnt["c"]
+        idx = await db.fetchone(
+            "SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_sign_in_log_qq_date'"
+        )
+        assert idx is not None
+        # 成员关系数据保留
+        user = await db.fetchone(
+            "SELECT 1 FROM users WHERE qq='u1' AND group_id='G1'"
+        )
+        assert user is not None
     finally:
         await db.close()
-    return "schema 迁移：v1→v2 加列、版本升级、数据保留"
+    return "schema 迁移：v1→v3 加列/accounts 回填/users 瘦身/去重索引/数据保留"
 
 
 async def test_schema_migration_idempotent():
@@ -140,7 +187,7 @@ async def test_legacy_config_migration():
 
 
 TESTS = [
-    ("schema_v1_to_v2", test_schema_v1_to_v2_migration),
+    ("schema_v1_to_v3", test_schema_v1_to_v3_migration),
     ("schema_idempotent", test_schema_migration_idempotent),
     ("legacy_config_migration", test_legacy_config_migration),
 ]

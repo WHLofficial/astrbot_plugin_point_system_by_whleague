@@ -28,7 +28,10 @@ _INJECT_PAYLOADS = [
 async def test_sql_injection_fuzz():
     async with TempDB() as t:
         await t.db.execute(
-            "INSERT INTO users (qq, group_id, points) VALUES ('victim','G1',10)"
+            "INSERT INTO accounts (qq, points) VALUES ('victim',10)"
+        )
+        await t.db.execute(
+            "INSERT INTO users (qq, group_id) VALUES ('victim','G1')"
         )
         before_users = await t.count("users")
 
@@ -60,7 +63,7 @@ async def test_sql_injection_fuzz():
 
         # 结果断言：库未被破坏，用户数据完好
         assert await t.count("users") == before_users
-        row = await t.dao.get_user("victim", "G1")
+        row = await t.dao.get_account("victim")
         assert row["points"] == 10
         # 注入目标表仍存在
         tables = await t.db.fetchall(
@@ -253,7 +256,10 @@ async def test_clear_token_security():
         )
         handler = AdminHandler(plugin)
         await t.db.execute(
-            "INSERT INTO users (qq, group_id, points) VALUES ('u1','G1',1)"
+            "INSERT INTO accounts (qq, points) VALUES ('u1',1)"
+        )
+        await t.db.execute(
+            "INSERT INTO users (qq, group_id) VALUES ('u1','G1')"
         )
 
         ev = FakeEvent("admin", "G1", is_admin=True)

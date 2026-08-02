@@ -45,12 +45,12 @@ async def test_lottery_edge_configs():
     async with TempDB() as t:
         svc = await _lottery(t, _lottery_cfg(lottery_tiers='{"tiers":[]}'))
         await t.db.execute(
-            "INSERT INTO users (qq, group_id, points) VALUES ('u1','G1',1000)"
+            "INSERT INTO accounts (qq, points) VALUES ('u1',1000)"
         )
         r = await svc.draw("u1", "G1")
         assert not r["success"] and "档位未配置" in r["msg"]
-        assert (await t.dao.get_user("u1", "G1"))["points"] == 1000  # 未扣费
-        # 无 users 行：余额视为 0 → 积分不足
+        assert (await t.dao.get_account("u1"))["points"] == 1000  # 未扣费
+        # 无 accounts 行：余额视为 0 → 积分不足
         r = await svc.draw("nobody", "G1")
         assert not r["success"] and "积分不足" in r["msg"]
     return "抽奖：空档位拒绝不扣费、未注册用户积分不足"
@@ -77,12 +77,12 @@ async def test_lottery_unlimited_and_accounting():
         )
         svc = await _lottery(t, win_cfg)
         await t.db.execute(
-            "INSERT INTO users (qq, group_id, points) VALUES ('u1','G1',1000)"
+            "INSERT INTO accounts (qq, points) VALUES ('u1',1000)"
         )
         with patch_random(randint=10):
             r = await svc.draw("u1", "G1")
         assert r["success"] and r["is_win"] and r["reward"] == 10 and "🎉" in r["msg"]
-        row = await t.dao.get_user("u1", "G1")
+        row = await t.dao.get_account("u1")
         assert row["points"] == 1000  # -10 成本 +10 奖励
         assert row["total_earned"] == 10  # 中奖计入累计获得
         txns = await t.db.fetchall(
@@ -121,11 +121,11 @@ async def test_lottery_unlimited_and_accounting():
         with patch_random(randint=0):
             r = await svc2.draw("u1", "G1")
         assert r["success"] and not r["is_win"]
-        row = await t.dao.get_user("u1", "G1")
+        row = await t.dao.get_account("u1")
         assert row["points"] == 990 and row["total_earned"] == 110  # 未中奖不计累计
         # 每日限额按业务日（period_start_str）判定：历史记录不计入今日
         await t.db.execute(
-            "INSERT INTO users (qq, group_id, points) VALUES ('u2','G1',100)"
+            "INSERT INTO accounts (qq, points) VALUES ('u2',100)"
         )
         await t.db.execute(
             "INSERT INTO lottery_record (qq, group_id, cost, reward_amount, is_win, tier_label, created_at) "
@@ -153,7 +153,7 @@ async def test_redeem_edge_stocks():
         # 无限库存（-1）多次兑换
         item_id = await t.dao.add_item("无限", 10, -1)
         await t.db.execute(
-            "INSERT INTO users (qq, group_id, points) VALUES ('u1','G1',1000)"
+            "INSERT INTO accounts (qq, points) VALUES ('u1',1000)"
         )
         for _ in range(3):
             r = await svc.redeem("u1", "G1", item_id, 1)
@@ -161,16 +161,16 @@ async def test_redeem_edge_stocks():
         item = await t.dao.get_item(item_id)
         assert item["stock"] == -1
         # 余额恰好相等
-        await t.db.execute("UPDATE users SET points=10 WHERE qq='u1'")
+        await t.db.execute("UPDATE accounts SET points=10 WHERE qq='u1'")
         r = await svc.redeem("u1", "G1", item_id, 1)
         assert r["success"]
-        assert (await t.dao.get_user("u1", "G1"))["points"] == 0
+        assert (await t.dao.get_account("u1"))["points"] == 0
         r = await svc.redeem("u1", "G1", item_id, 1)  # 现在不足
         assert not r["success"] and "积分不足" in r["msg"]
         # 数量×单价扣费正确
         item2 = await t.dao.add_item("多件", 50, 5)
         await t.db.execute(
-            "INSERT INTO users (qq, group_id, points) VALUES ('u2','G1',500)"
+            "INSERT INTO accounts (qq, points) VALUES ('u2',500)"
         )
         r = await svc.redeem("u2", "G1", item2, 2)
         assert r["success"]
@@ -178,7 +178,7 @@ async def test_redeem_edge_stocks():
             "SELECT item_cost, quantity FROM redeem_records WHERE qq='u2'"
         )
         assert rec["item_cost"] == 100 and rec["quantity"] == 2
-        assert (await t.dao.get_user("u2", "G1"))["points"] == 400
+        assert (await t.dao.get_account("u2"))["points"] == 400
         # 下架物品
         await t.dao.soft_delete_item(item2)
         r = await svc.redeem("u2", "G1", item2, 1)
@@ -203,7 +203,7 @@ async def test_redeem_discount_expired():
         svc = RedeemService(t.db, t.dao, PointService(t.db, t.dao))
         item_id = await t.dao.add_item("商品", 100, 5)
         await t.db.execute(
-            "INSERT INTO users (qq, group_id, points) VALUES ('u1','G1',1000)"
+            "INSERT INTO accounts (qq, points) VALUES ('u1',1000)"
         )
         # 折扣有效期内按折扣价
         future = (datetime.now() + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
@@ -235,16 +235,16 @@ async def test_point_earned_exclusion():
             ("admin_sub", "lottery_cost", "redeem_cost", "easter_unlucky")
         ):
             await ps.add("u1", "G1", 10, reason)
-            row = await t.dao.get_user("u1", "G1")
+            row = await t.dao.get_account("u1")
             assert row["points"] == (i + 1) * 10 and row["total_earned"] == 0, (
                 reason,
                 dict(row),
             )
         await ps.add("u1", "G1", 10, "签到")
-        row = await t.dao.get_user("u1", "G1")
+        row = await t.dao.get_account("u1")
         assert row["points"] == 50 and row["total_earned"] == 10
         await ps.add("u1", "G1", 10, "active_reward")
-        row = await t.dao.get_user("u1", "G1")
+        row = await t.dao.get_account("u1")
         assert row["total_earned"] == 20
     return "积分：扣减型 reason 不计累计获得、奖励型计入"
 
@@ -271,22 +271,24 @@ async def test_point_invalid_and_overdraw():
         await ps.add("u1", "G1", 5, "test")
         r = await ps.subtract("u1", "G1", 6, "test_sub")
         assert r["balance"] == -1
-        row = await t.dao.get_user("u1", "G1")
-        assert row["points"] == -1 and row["negative_title_id"] == 1
+        row = await t.dao.get_account("u1")
+        assert row["points"] == -1
+        assert (await t.dao.get_user("u1", "G1"))["negative_title_id"] == 1
         txn = await t.db.fetchone(
             "SELECT amount, balance_after FROM point_transactions WHERE qq='u1' AND reason='test_sub'"
         )
         assert txn["amount"] == -6 and txn["balance_after"] == -1
         # 未注册用户自动建行
         await ps.add("nobody", "G2", 7, "test")
-        row = await t.dao.get_user("nobody", "G2")
+        row = await t.dao.get_account("nobody")
         assert row["points"] == 7
+        assert (await t.dao.get_user("nobody", "G2")) is not None
         # 未注册用户扣分：自动建行并如实扣成负数（不再假成功/静默丢失）
         r2 = await ps.subtract("ghost", "G3", 8, "admin_sub")
         assert r2["balance"] == -8
-        row = await t.dao.get_user("ghost", "G3")
+        row = await t.dao.get_account("ghost")
         assert row is not None and row["points"] == -8
-        assert row["negative_title_id"] == 1  # 扣负后自动补头衔
+        assert (await t.dao.get_user("ghost", "G3"))["negative_title_id"] == 1  # 扣负后自动补头衔
         txn = await t.db.fetchone(
             "SELECT amount, balance_after FROM point_transactions WHERE qq='ghost' AND reason='admin_sub'"
         )
@@ -321,7 +323,10 @@ async def test_negative_title_with_bot_card():
         bot = FakeBot(member_card="旧名片")
         # 负余额来源：签到非酋彩蛋（subtract 不允许扣成负数，直接置负）
         await t.db.execute(
-            "INSERT INTO users (qq, group_id, points) VALUES ('1001','1',-10)"
+            "INSERT INTO accounts (qq, points) VALUES ('1001',-10)"
+        )
+        await t.db.execute(
+            "INSERT INTO users (qq, group_id) VALUES ('1001','1')"
         )
         await ps.ensure_negative_title("1001", "1", bot=bot)
         row = await t.dao.get_user("1001", "1")
@@ -334,12 +339,13 @@ async def test_negative_title_with_bot_card():
         assert any(c["card"] == "群女仆1号" for c in card_calls), bot.calls
         # 回正：恢复原名片
         await ps.add("1001", "1", 10, "admin_add", admin_override=True, bot=bot)
-        row = await t.dao.get_user("1001", "1")
-        assert row["points"] == 0 and row["negative_title_id"] is None
+        row = await t.dao.get_account("1001")
+        assert row["points"] == 0
+        assert (await t.dao.get_user("1001", "1"))["negative_title_id"] is None
         card_calls = [c for a, c in bot.calls if a == "set_group_card"]
         assert card_calls[-1]["card"] == "旧名片"
         # 无 bot 时仅维护 DB 状态（编号复用为最小可用 1）
-        await t.db.execute("UPDATE users SET points=-5 WHERE qq='1001'")
+        await t.db.execute("UPDATE accounts SET points=-5 WHERE qq='1001'")
         n_cards = len([a for a, _ in bot.calls if a == "set_group_card"])
         await ps.ensure_negative_title("1001", "1", bot=None)
         row = await t.dao.get_user("1001", "1")
@@ -356,12 +362,15 @@ async def test_negative_title_id_reuse():
 
         ps = PointService(t.db, t.dao)
         await t.db.execute(
-            "INSERT INTO users (qq, group_id, points) VALUES ('1001','1',-5),('1002','1',-5)"
+            "INSERT INTO accounts (qq, points) VALUES ('1001',-5),('1002',-5)"
+        )
+        await t.db.execute(
+            "INSERT INTO users (qq, group_id) VALUES ('1001','1'),('1002','1')"
         )
         await ps.ensure_negative_title("1001", "1", bot=None)
         assert (await t.dao.get_user("1001", "1"))["negative_title_id"] == 1
         # 回正释放编号
-        await t.db.execute("UPDATE users SET points=5 WHERE qq='1001'")
+        await t.db.execute("UPDATE accounts SET points=5 WHERE qq='1001'")
         await ps.ensure_negative_title("1001", "1", bot=None)
         assert (await t.dao.get_user("1001", "1"))["negative_title_id"] is None
         # 新用户复用最小可用编号
@@ -485,14 +494,19 @@ async def test_dao_misc():
         # 排行 min_points 过滤（0 分与负分不参与）
         for qq, pts in (("a", 10), ("b", 0), ("c", -5)):
             await t.db.execute(
-                "INSERT INTO users (qq, group_id, points) VALUES (?,?,?)",
-                (qq, "G1", pts),
+                "INSERT INTO accounts (qq, points) VALUES (?,?)", (qq, pts)
+            )
+            await t.db.execute(
+                "INSERT INTO users (qq, group_id) VALUES (?,?)", (qq, "G1")
             )
         rows = await t.dao.get_top_n_by_group("G1", 10)
         assert [r["qq"] for r in rows] == ["a"]
         # 生日用户查询
         await t.db.execute(
-            "INSERT INTO users (qq, group_id, birthday) VALUES ('d','G1','12-25')"
+            "INSERT INTO accounts (qq, birthday) VALUES ('d','12-25')"
+        )
+        await t.db.execute(
+            "INSERT INTO users (qq, group_id) VALUES ('d','G1')"
         )
         assert [r["qq"] for r in await t.dao.get_birthday_users("G1", "12-25")] == ["d"]
         assert await t.dao.count_users_in_group("G1") == 4

@@ -184,6 +184,45 @@ def today_nodash() -> str:
     return today_str().replace("-", "")
 
 
+async def test_keyword_matcher_strict():
+    """v0.2.1 严格匹配：仅纯触发词形态触发，附加文本/标点/大小写边界。"""
+    from astrbot_plugin_point_system_by_whleague.utils.keyword_matcher import (
+        is_lottery_message,
+        is_ranking_message,
+        is_signin_message,
+    )
+
+    sign = ["签到", "sign", "打卡"]
+    # 严格相等触发（大小写不敏感、空白压缩）
+    assert is_signin_message("签到", sign)
+    assert is_signin_message(" 签到 ", sign)
+    assert is_signin_message("SIGN", sign)
+    assert is_signin_message("打卡", sign)
+    # 附加文本/标点/组合词不触发
+    for bad in ("我要签到", "签到打卡", "签到！", "签到 一下", "签到一下", "sign in", "打卡啦"):
+        assert not is_signin_message(bad, sign), bad
+    # 抽奖：关键词 / 口令+关键词 / 关键词+口令 三形态
+    lottery = ["抽奖"]
+    assert is_lottery_message("抽奖", "whl", lottery)
+    assert is_lottery_message("whl抽奖", "whl", lottery)
+    assert is_lottery_message("抽奖whl", "whl", lottery)
+    assert is_lottery_message("whl 抽奖", "whl", lottery)  # 空白压缩
+    assert is_lottery_message("WHL抽奖", "whl", lottery)  # 大小写
+    for bad in ("我要抽奖", "whl 今天抽奖", "抽奖whl哈哈", "抽奖！", "whl", "抽奖 抽奖"):
+        assert not is_lottery_message(bad, "whl", lottery), bad
+    # 无口令时仅关键词形态
+    assert is_lottery_message("抽奖", "", lottery)
+    assert not is_lottery_message("whl抽奖", "", lottery)
+    # 排行
+    assert is_ranking_message("排行")
+    assert is_ranking_message("排名")
+    assert is_ranking_message("积分榜")
+    assert is_ranking_message(" 排行 ")
+    for bad in ("排行榜", "我要排行", "积分榜！"):
+        assert not is_ranking_message(bad), bad
+    return "关键词严格匹配：三功能边界/大小写/空白/附加文本全部正确"
+
+
 TESTS = [
     ("parse_keyword_list", test_parse_keyword_list),
     ("day_boundary_parse", test_day_boundary_parse),
@@ -192,4 +231,5 @@ TESTS = [
     ("generate_record_no", test_generate_record_no),
     ("security_parsers", test_security_parsers),
     ("fortune_format", test_fortune_format),
+    ("keyword_matcher_strict", test_keyword_matcher_strict),
 ]

@@ -19,7 +19,7 @@ async def test_birthday_set_and_query():
             ev = FakeEvent("u1", "G1", msg=f"/设置生日 {fmt}")
             msgs = await collect(handler.set_birthday(ev))
             assert any("已设置生日为 12-25" in m for m in msgs)
-        row = await t.dao.get_user("u1", "G1")
+        row = await t.dao.get_account("u1")
         assert row["birthday"] == "12-25"
         # 查询自己
         ev = FakeEvent("u1", "G1", msg="/查生日")
@@ -27,7 +27,10 @@ async def test_birthday_set_and_query():
         assert any("12-25" in m for m in msgs)
         # 查询他人（@QQ 形式）
         await t.db.execute(
-            "INSERT INTO users (qq, group_id, birthday) VALUES ('10002','G1','02-29')"
+            "INSERT INTO accounts (qq, birthday) VALUES ('10002','02-29')"
+        )
+        await t.db.execute(
+            "INSERT INTO users (qq, group_id) VALUES ('10002','G1')"
         )
         ev = FakeEvent("u1", "G1", msg="/查生日 @10002")
         msgs = await collect(handler.query_birthday(ev))
@@ -71,8 +74,11 @@ async def test_birthday_announce_service():
         assert r == {"announced": False, "reason": "no_birthdays"}
         # 有寿星（含跨群隔离：仅本群用户）
         await t.db.execute(
-            "INSERT INTO users (qq, group_id, birthday) VALUES ('a','G1',?),( 'b','G2',?)",
+            "INSERT INTO accounts (qq, birthday) VALUES ('a',?),('b',?)",
             (today_mmdd(), today_mmdd()),
+        )
+        await t.db.execute(
+            "INSERT INTO users (qq, group_id) VALUES ('a','G1'),('b','G2')"
         )
         r = await svc.announce_birthdays("G1")
         assert r["announced"] is True and r["users"] == ["a"]
@@ -108,8 +114,11 @@ async def test_birthday_signin_bonus_and_year_dedup():
 
         await t.db.execute("UPDATE easter_events SET is_active=0")
         await t.db.execute(
-            "INSERT INTO users (qq, group_id, birthday) VALUES ('u1','G1',?)",
+            "INSERT INTO accounts (qq, birthday) VALUES ('u1',?)",
             (today_mmdd(),),
+        )
+        await t.db.execute(
+            "INSERT INTO users (qq, group_id) VALUES ('u1','G1')"
         )
         cfg = base_cfg(
             signin_fixed_mode=True,
@@ -131,7 +140,7 @@ async def test_birthday_signin_bonus_and_year_dedup():
         )
         r = await svc.sign_in("u1", "G1", "aiocqhttp", "签到")
         assert r["points"] == 10 + 100, r["points"]  # 生日奖励
-        row = await t.dao.get_user("u1", "G1")
+        row = await t.dao.get_account("u1")
         assert row["birthday_year"] == int(today_str()[:4])
         # 模拟下一年再签：同年不再发
         await t.db.execute("DELETE FROM sign_in_log WHERE qq='u1'")
@@ -139,7 +148,7 @@ async def test_birthday_signin_bonus_and_year_dedup():
             datetime.strptime(today_str(), "%Y-%m-%d") - timedelta(days=1)
         ).strftime("%Y-%m-%d")
         await t.db.execute(
-            "UPDATE users SET last_sign_date=?, consecutive_days=1, total_sign_days=1 WHERE qq='u1' AND group_id='G1'",
+            "UPDATE accounts SET last_sign_date=?, consecutive_days=1, total_sign_days=1 WHERE qq='u1'",
             (yesterday,),
         )
         r = await svc.sign_in("u1", "G1", "aiocqhttp", "签到")
@@ -158,8 +167,11 @@ async def test_birthday_cron_announce_idempotent():
         from astrbot_plugin_point_system_by_whleague.utils.helpers import today_mmdd
 
         await t.db.execute(
-            "INSERT INTO users (qq, group_id, birthday, platform) VALUES ('a','G1',?,'aiocqhttp'),('b','G1',?,'aiocqhttp')",
+            "INSERT INTO accounts (qq, birthday, platform) VALUES ('a',?,'aiocqhttp'),('b',?,'aiocqhttp')",
             (today_mmdd(), today_mmdd()),
+        )
+        await t.db.execute(
+            "INSERT INTO users (qq, group_id) VALUES ('a','G1'),('b','G1')"
         )
         obj = PointSystemPlugin.__new__(PointSystemPlugin)
 

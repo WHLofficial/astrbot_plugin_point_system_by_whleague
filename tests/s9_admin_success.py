@@ -64,7 +64,7 @@ async def test_admin_adjust_points():
         ev = FakeEvent("admin", "G1", is_admin=True, msg="/加分 @10001 10")
         msgs = await collect(handler.adjust_points(ev, "加分"))
         assert any("加 10" in m for m in msgs), msgs
-        row = await t.dao.get_user("10001", "G1")
+        row = await t.dao.get_account("10001")
         assert row["points"] == 10
         txn = await t.db.fetchone(
             "SELECT reason, admin_qq FROM point_transactions WHERE qq='10001'"
@@ -73,19 +73,19 @@ async def test_admin_adjust_points():
         # 纯数字 Q 号
         ev2 = FakeEvent("admin", "G1", is_admin=True, msg="/加分 20002 5")
         await collect(handler.adjust_points(ev2, "加分"))
-        assert (await t.dao.get_user("20002", "G1"))["points"] == 5
+        assert (await t.dao.get_account("20002"))["points"] == 5
         # 扣分
         ev3 = FakeEvent("admin", "G1", is_admin=True, msg="/扣分 @10001 3")
         msgs = await collect(handler.adjust_points(ev3, "扣分"))
         assert any("扣 3" in m for m in msgs)
-        assert (await t.dao.get_user("10001", "G1"))["points"] == 7
+        assert (await t.dao.get_account("10001"))["points"] == 7
         # 扣分可扣成负数（管理员惩罚场景）+ 自动补负分头衔
         ev4 = FakeEvent("admin", "G1", is_admin=True, msg="/扣分 @10001 999")
         msgs = await collect(handler.adjust_points(ev4, "扣分"))
         assert any("扣 999" in m for m in msgs), msgs
-        row = await t.dao.get_user("10001", "G1")
+        row = await t.dao.get_account("10001")
         assert row["points"] == 7 - 999, row["points"]
-        assert row["negative_title_id"] == 1
+        assert (await t.dao.get_user("10001", "G1"))["negative_title_id"] == 1
         # 参数错误
         ev5 = FakeEvent("admin", "G1", is_admin=True, msg="/加分 @10001")
         msgs = await collect(handler.adjust_points(ev5, "加分"))
@@ -152,6 +152,28 @@ async def test_admin_item_crud():
         msgs = await collect(handler.modify_item(ev))
         assert any("参数错误" in m for m in msgs)
     return "管理：商品添加/删除/修改全字段与校验"
+
+
+async def test_admin_daily_kw_reserved():
+    """口令保留字校验：触发词 / 口令±触发词 组合形态全部拒绝，正常口令通过。"""
+    async with TempDB() as t:
+        handler, _ = await _admin_plugin(t)
+        blocked = (
+            "签到", "打卡", "抽奖", "lottery", "排行", "排名", "积分榜",
+            "whl抽奖", "抽奖whl",
+        )
+        for kw in blocked:
+            ev = FakeEvent("admin", "G1", is_admin=True, msg=f"/设置今日口令 {kw} 10")
+            msgs = await collect(handler.set_daily_kw(ev))
+            assert any("口令" in m and "触发词" in m for m in msgs), (kw, msgs)
+            assert await t.count("daily_keyword") == 0, kw
+        # 正常口令通过（不构成任何冲突形态，附加文本不属于组合形态）
+        for kw in ("红包", "口令", "whlx", "抽奖券", "whl抽奖吧"):
+            ev = FakeEvent("admin", "G1", is_admin=True, msg=f"/设置今日口令 {kw} 10")
+            msgs = await collect(handler.set_daily_kw(ev))
+            assert any("已设置今日口令" in m for m in msgs), (kw, msgs)
+            await t.dao.clear_daily_keyword("G1")
+    return "口令保留字：触发词/口令±触发词三形态拒绝、正常口令通过"
 
 
 async def test_admin_daily_keyword():
@@ -420,13 +442,19 @@ async def test_admin_global_clear_flow():
     async with TempDB() as t:
         handler, _ = await _admin_plugin(t)
         await t.db.execute(
-            "INSERT INTO users (qq, group_id, points) VALUES ('1001','1',-5)"
+            "INSERT INTO accounts (qq, points) VALUES ('1001',-5)"
+        )
+        await t.db.execute(
+            "INSERT INTO users (qq, group_id) VALUES ('1001','1')"
         )
         await t.db.execute(
             "UPDATE users SET negative_title_id=1, negative_title_prev_card='原名片' WHERE qq='1001'"
         )
         await t.db.execute(
-            "INSERT INTO users (qq, group_id, points) VALUES ('1002','1',10)"
+            "INSERT INTO accounts (qq, points) VALUES ('1002',10)"
+        )
+        await t.db.execute(
+            "INSERT INTO users (qq, group_id) VALUES ('1002','1')"
         )
         await t.dao.add_item("商品", 10, 1)
         await t.dao.add_date_reward("01-01", None, "元旦", 5, 1.0)
@@ -441,6 +469,7 @@ async def test_admin_global_clear_flow():
         assert any("已清空全部数据" in m for m in msgs), msgs
         # 全部业务表清空
         assert await t.count("users") == 0
+        assert await t.count("accounts") == 0
         assert await t.count("redeem_items") == 0
         assert await t.count("date_rewards") == 0
         assert await t.count("admins") == 0
@@ -461,6 +490,7 @@ TESTS = [
     ("admin_adjust_points", test_admin_adjust_points),
     ("admin_item_crud", test_admin_item_crud),
     ("admin_daily_keyword", test_admin_daily_keyword),
+    ("admin_daily_kw_reserved", test_admin_daily_kw_reserved),
     ("admin_set_config", test_admin_set_config),
     ("admin_set_config_webui", test_admin_set_config_webui_path),
     ("admin_set_config_hot_reload", test_admin_set_config_hot_reload),

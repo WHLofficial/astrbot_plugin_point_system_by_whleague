@@ -56,10 +56,11 @@ async def test_ar_command_message_skipped():
 async def test_ar_signin_lottery_message_skipped():
     async with TempDB() as t:
         handler, ps = await _handler_plugin(t, _cfg())
-        ev = FakeEvent("u1", "G1", msg="今天签到打卡")
+        # v0.2.1 严格匹配：仅纯触发词形态被跳过，附加文本消息不再拦截
+        ev = FakeEvent("u1", "G1", msg="签到")
         await handler.handle(ev)
         assert await t.dao.get_user("u1", "G1") is None
-        ev2 = FakeEvent("u1", "G1", msg="whl 抽奖")
+        ev2 = FakeEvent("u1", "G1", msg="whl抽奖")
         await handler.handle(ev2)
         assert await t.dao.get_user("u1", "G1") is None
     return "活跃奖励：签到/抽奖关键词消息跳过"
@@ -81,12 +82,12 @@ async def test_ar_user_cooldown():
         handler, ps = await _handler_plugin(t, cfg)
         with patch_random(randint=3):
             await handler.handle(FakeEvent("u1", "G1", msg="第一条消息内容"))
-        row = await t.dao.get_user("u1", "G1")
+        row = await t.dao.get_account("u1")
         assert row["points"] == 3
         # 冷却期内第二次：拦截
         with patch_random(randint=5):
             await handler.handle(FakeEvent("u1", "G1", msg="第二条消息内容"))
-        row = await t.dao.get_user("u1", "G1")
+        row = await t.dao.get_account("u1")
         assert row["points"] == 3
     return "活跃奖励：用户冷却期内拦截"
 
@@ -118,7 +119,7 @@ async def test_ar_probability_miss_hit():
         assert await t.dao.get_user("u1", "G1") is None
         with patch_random(random=0.1, randint=4):
             await handler.handle(FakeEvent("u2", "G1", msg="概率命中消息内容"))
-        row = await t.dao.get_user("u2", "G1")
+        row = await t.dao.get_account("u2")
         assert row["points"] == 4
     return "活跃奖励：概率未命中不发、命中发放"
 
@@ -127,12 +128,15 @@ async def test_ar_negative_user_skipped():
     async with TempDB() as t:
         handler, ps = await _handler_plugin(t, _cfg(active_reward_global_cooldown=0))
         await t.db.execute(
-            "INSERT INTO users (qq, group_id, points) VALUES ('neg','G1',-5)"
+            "INSERT INTO accounts (qq, points) VALUES ('neg',-5)"
+        )
+        await t.db.execute(
+            "INSERT INTO users (qq, group_id) VALUES ('neg','G1')"
         )
         ev = FakeEvent("neg", "G1", msg="负分用户消息内容")
         with patch_random(randint=4):
             await handler.handle(ev)
-        row = await t.dao.get_user("neg", "G1")
+        row = await t.dao.get_account("neg")
         assert row["points"] == -5  # 未加分
         assert ev.sent == []
     return "活跃奖励：负分用户跳过"
@@ -144,7 +148,7 @@ async def test_ar_reward_added_and_sent():
         ev = FakeEvent("u1", "G1", msg="触发活跃奖励的消息内容")
         with patch_random(randint=4):
             await handler.handle(ev)
-        row = await t.dao.get_user("u1", "G1")
+        row = await t.dao.get_account("u1")
         assert row["points"] == 4 and row["total_earned"] == 4
         txn = await t.db.fetchone(
             "SELECT reason, amount FROM point_transactions WHERE qq='u1'"
@@ -161,7 +165,7 @@ async def test_ar_daily_keyword_combined():
         ev = FakeEvent("u1", "G1", msg="今天抢到红包了")
         with patch_random(randint=2):
             await handler.handle(ev)
-        row = await t.dao.get_user("u1", "G1")
+        row = await t.dao.get_account("u1")
         assert row["points"] == 12  # 口令 10 + 活跃 2
         assert len(ev.sent) == 2
         texts = [str(c) for c in ev.sent]

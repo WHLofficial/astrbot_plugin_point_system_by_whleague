@@ -98,7 +98,10 @@ async def test_lottery_handler_paths():
             negative_disable_lottery=True,
         )
         await t.db.execute(
-            "INSERT INTO users (qq, group_id, points) VALUES ('u1','G1',1000)"
+            "INSERT INTO accounts (qq, points) VALUES ('u1',1000)"
+        )
+        await t.db.execute(
+            "INSERT INTO users (qq, group_id) VALUES ('u1','G1')"
         )
         handler = LotteryHandler(
             types.SimpleNamespace(
@@ -138,31 +141,40 @@ async def test_ranking_handler_display():
         # 空榜
         msgs = await collect(handler.handle(FakeEvent("u1", "G1", msg="/排行")))
         assert any("暂无排行数据" in m for m in msgs)
-        # 3 人本群榜
+        # 3 人本群榜（无 bot 时昵称回退 QQ）
         for i in range(3):
             await t.db.execute(
-                "INSERT INTO users (qq, group_id, points) VALUES (?,?,?)",
-                (f"u{i}", "G1", 30 - i * 10),
+                "INSERT INTO accounts (qq, points) VALUES (?,?)",
+                (f"u{i}", 30 - i * 10),
+            )
+            await t.db.execute(
+                "INSERT INTO users (qq, group_id) VALUES (?,?)", (f"u{i}", "G1")
             )
         msgs = await collect(handler.handle(FakeEvent("u1", "G1", msg="/排行")))
         text = "\n".join(msgs)
         assert "本群排行" in text and "u0" in text and "30 积分" in text
         # 少于 3 人回退全局
         await t.db.execute(
-            "INSERT INTO users (qq, group_id, points) VALUES ('g1','G2',5)"
+            "INSERT INTO accounts (qq, points) VALUES ('g1',5)"
         )
         await t.db.execute(
-            "INSERT INTO users (qq, group_id, points) VALUES ('g2','G2',4)"
+            "INSERT INTO users (qq, group_id) VALUES ('g1','G2')"
+        )
+        await t.db.execute(
+            "INSERT INTO accounts (qq, points) VALUES ('g2',4)"
+        )
+        await t.db.execute(
+            "INSERT INTO users (qq, group_id) VALUES ('g2','G2')"
         )
         msgs = await collect(handler.handle(FakeEvent("u1", "G2", msg="/排行")))
         text = "\n".join(msgs)
         assert "全局排行" in text and "群G1" in text
         # 负分/0 分用户不参与排行
         await t.db.execute(
-            "INSERT INTO users (qq, group_id, points) VALUES ('neg','G1',-5)"
+            "INSERT INTO accounts (qq, points) VALUES ('neg',-5)"
         )
         await t.db.execute(
-            "INSERT INTO users (qq, group_id, points) VALUES ('zero','G1',0)"
+            "INSERT INTO accounts (qq, points) VALUES ('zero',0)"
         )
         msgs = await collect(handler.handle(FakeEvent("u1", "G1", msg="/排行")))
         text = "\n".join(msgs)
@@ -362,13 +374,19 @@ async def test_main_routes():
                 yield event.plain_result("记录")
 
         obj = PointSystemPlugin.__new__(PointSystemPlugin)
-        # on_sign_in：唤醒命令（流水）跳过签到
+        obj.config_cache = base_cfg()
+        # on_sign_in：非触发消息（含"流水"）跳过签到
         obj.sign_in_handler = _SignInHandler()
         msgs = await collect(
             obj.on_sign_in(FakeEvent("u1", "G1", msg="流水 1", at_wake=True))
         )
         assert msgs == [] and obj.sign_in_handler.calls == []
-        # 非唤醒命令：正常走 handler
+        # 带附加文本的签到消息不触发（严格匹配）
+        msgs = await collect(
+            obj.on_sign_in(FakeEvent("u1", "G1", msg="我想签到", at_wake=True))
+        )
+        assert msgs == [] and obj.sign_in_handler.calls == []
+        # 非唤醒命令：严格触发才走 handler
         msgs = await collect(obj.on_sign_in(FakeEvent("u1", "G1", msg="签到")))
         assert msgs == ["签到了"] and len(obj.sign_in_handler.calls) == 1
         # cmd_redeem 参数路由

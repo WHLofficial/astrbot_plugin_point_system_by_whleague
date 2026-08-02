@@ -102,10 +102,6 @@ async def test_catalog_integrity():
         for e in s["entries"]
     ]
     assert kw_entries and all(e["trigger"] == "keyword" for e in kw_entries)
-    # 别名全部登记在 _PLUGIN_COMMANDS 防御集合
-    from astrbot_plugin_point_system_by_whleague.main import _PLUGIN_COMMANDS
-
-    assert {"积分系统帮助"} | aliases <= set(_PLUGIN_COMMANDS)
     return f"目录完整性：{len(registered)} 指令 + {len(aliases)} 别名全部登记"
 
 

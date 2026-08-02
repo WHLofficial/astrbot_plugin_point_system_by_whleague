@@ -16,9 +16,13 @@ async def _seed_users(t, n, group="G1"):
     conn = t.db.conn
     await conn.execute("BEGIN")
     for i in range(0, n, 500):
-        batch = [(f"u{i + j}", group, (i + j) % 1000) for j in range(min(500, n - i))]
+        batch = [(f"u{i + j}", (i + j) % 1000) for j in range(min(500, n - i))]
         await conn.executemany(
-            "INSERT INTO users (qq, group_id, points) VALUES (?,?,?)", batch
+            "INSERT INTO accounts (qq, points) VALUES (?,?)", batch
+        )
+        batch = [(f"u{i + j}", group) for j in range(min(500, n - i))]
+        await conn.executemany(
+            "INSERT INTO users (qq, group_id) VALUES (?,?)", batch
         )
     await conn.commit()
 
@@ -139,10 +143,12 @@ async def bench_ranking():
     async with TempDB() as t:
         await _seed_users(t, 10000)
         plan = await t.db.fetchall(
-            "EXPLAIN QUERY PLAN SELECT qq, points FROM users WHERE group_id='G1' AND points>=1 ORDER BY points DESC LIMIT 10"
+            "EXPLAIN QUERY PLAN SELECT u.qq, a.points FROM users u "
+            "JOIN accounts a ON a.qq=u.qq WHERE u.group_id='G1' AND a.points>=1 "
+            "ORDER BY a.points DESC LIMIT 10"
         )
         plan_text = " ".join(str(r[3]) for r in plan)  # detail 列
-        idx_used = "idx_users_group_points" in plan_text
+        idx_used = "idx_accounts_points" in plan_text
         timer = Timer()
         for _ in range(100):
             await t.dao.get_top_n_by_group("G1", 10)
@@ -205,7 +211,7 @@ async def bench_lottery():
         ps = PointService(t.db, t.dao)
         svc = LotteryService(t.db, t.dao, ps, cfg)
         await t.db.execute(
-            "INSERT INTO users (qq, group_id, points) VALUES ('u1','G1',100000)"
+            "INSERT INTO accounts (qq, points) VALUES ('u1',100000)"
         )
         timer = Timer()
         for _ in range(1000):

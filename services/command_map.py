@@ -42,7 +42,7 @@ _COMMAND_SECTIONS = [
             {
                 "trigger": "keyword",
                 "name": "{lottery_kw} 抽奖（需口令 {passphrase}）",
-                "usage": "whl抽奖",
+                "usage": "{passphrase}抽奖",
                 "desc": "口令抽奖，五档权重奖励",
             },
             {
@@ -78,9 +78,9 @@ _COMMAND_SECTIONS = [
             },
             {
                 "trigger": "command",
-                "name": "/流水 [页码 | all | @用户] [页码]",
+                "name": "/流水 [页码 | all/全部 | @用户] [页码]",
                 "usage": "/流水 3",
-                "desc": "查看积分流水；all / @用户 仅管理员",
+                "desc": "查看积分流水；all/全部 / @用户 仅管理员",
             },
             {
                 "trigger": "command",
@@ -141,8 +141,8 @@ _COMMAND_SECTIONS = [
             {
                 "trigger": "command",
                 "name": "/修改兑换 <ID> <字段> <值>",
-                "usage": "/修改兑换 3 cost 150",
-                "desc": "修改物品属性（cost / discount_price / stock / 折扣时间）",
+                "usage": "/修改兑换 3 价格 150",
+                "desc": "修改物品属性（价格/库存/折扣价/折扣时间/名称/描述）",
             },
             {
                 "trigger": "command",
@@ -188,14 +188,14 @@ _COMMAND_SECTIONS = [
             },
             {
                 "trigger": "command",
-                "name": "/兑换记录 all|pending [页码]",
-                "usage": "/兑换记录 all",
+                "name": "/兑换记录 all/全部 | pending/未核销 [页码]",
+                "usage": "/兑换记录 全部",
                 "desc": "查看全部 / 未核销兑换记录（仅管理员）",
             },
             {
                 "trigger": "command",
-                "name": "/流水 <@用户 | all> [页码]",
-                "usage": "/流水 all",
+                "name": "/流水 <@用户 | all/全部> [页码]",
+                "usage": "/流水 全部",
                 "desc": "查看指定用户 / 全群流水（仅管理员）",
             },
             {

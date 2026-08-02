@@ -1,7 +1,7 @@
 # 积分系统插件 — 完整设计文档
 
-> 版本: v1.0  
-> 更新时间: 2026-07-30
+> 版本: v1.1  
+> 更新时间: 2026-08-02
 
 ---
 
@@ -37,15 +37,20 @@
 | 10 | **管理员指令** | 独立管理员名单（bot 主人自动为管理员），@或 QQ 号增减积分，管理兑换/口令/配置 |
 | 11 | **生日系统** | 记录生日（MM-DD / MM月DD日），生日签到奖励，定时播报当日寿星 |
 | 12 | **负分联动** | 负分仅可签到恢复积分，不能抽奖/兑换/活跃奖励，自动分配/撤销"群女仆X号"头衔 |
-| 13 | **自动备份** | 多本地目标路径，定时备份（默认凌晨 3:00），备份前 wal_checkpoint |
+| 13 | **自动备份** | 多本地目标目录（`backup_dirs` 配置），定时备份（默认 04:00），`VACUUM INTO` 一致性快照 |
 | 14 | **积分流水** | 每笔积分变动自动记录（时间、原因、变动值、余额），用户可查明细 |
 | 15 | **签到统计** | 查询今日签到人数、签到率、首签用户、连签王 |
 | 16 | **每日运势** | 签到回复尾部自动附带运势文本（同用户同天一致，纯趣味不涉及积分） |
 | 17 | **兑换折扣** | 管理员可为兑换物品设置限时折扣价 |
+| 18 | **反馈增强（v0.2.2）** | 签到反馈含当日排名/连签/当前积分；抽奖反馈含消耗/积分变化/当前积分；兑换反馈含订单号/剩余库存/积分余额/核销提示；`/查生日` 显示群昵称 |
 
 ---
 
 ## 2. 数据表设计
+
+> 当前 schema **v3**（v1 → v2：负分头衔原名片 `negative_title_prev_card`、流水操作人 `admin_qq`；
+> v2 → v3：积分一号跨群共享，accounts 按 QQ 全局唯一，users 瘦身为群级数据）。
+> 旧库首次加载自动迁移（`db/schema._migrate`），升级前建议先备份数据库。
 
 ### 2.1 accounts — 全局账户表（v0.2.0 新增，一号跨群共享）
 
@@ -131,9 +136,12 @@ CREATE TABLE IF NOT EXISTS lottery_record (
     created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 CREATE INDEX IF NOT EXISTS idx_lottery_group ON lottery_record(group_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_lottery_qq_date ON lottery_record(qq, created_at);
 ```
 
-### 2.4 point_transactions — 积分流水表
+> `idx_lottery_qq_date` 加速"每日抽奖限次按 QQ 全局统计"（v0.2.1）。
+
+### 2.5 point_transactions — 积分流水表
 
 ```sql
 CREATE TABLE IF NOT EXISTS point_transactions (
@@ -144,6 +152,7 @@ CREATE TABLE IF NOT EXISTS point_transactions (
     balance_after INTEGER NOT NULL,
     reason TEXT NOT NULL,
     ref_id INTEGER,
+    admin_qq TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 CREATE INDEX IF NOT EXISTS idx_pt_qq_group ON point_transactions(qq, group_id, created_at DESC);
@@ -171,7 +180,7 @@ CREATE INDEX IF NOT EXISTS idx_pt_reason ON point_transactions(reason);
 | `admin_add` | 管理员加分 |
 | `admin_sub` | 管理员扣分 |
 
-### 2.5 redeem_items — 兑换物品表
+### 2.6 redeem_items — 兑换物品表
 
 ```sql
 CREATE TABLE IF NOT EXISTS redeem_items (
@@ -189,7 +198,7 @@ CREATE TABLE IF NOT EXISTS redeem_items (
 );
 ```
 
-### 2.6 redeem_records — 兑换记录表
+### 2.7 redeem_records — 兑换记录表
 
 ```sql
 CREATE TABLE IF NOT EXISTS redeem_records (
@@ -212,7 +221,7 @@ CREATE INDEX IF NOT EXISTS idx_redeem_records_status ON redeem_records(status);
 CREATE INDEX IF NOT EXISTS idx_redeem_records_group ON redeem_records(group_id);
 ```
 
-### 2.7 admins — 管理员表
+### 2.8 admins — 管理员表
 
 ```sql
 CREATE TABLE IF NOT EXISTS admins (
@@ -225,7 +234,7 @@ CREATE TABLE IF NOT EXISTS admins (
 );
 ```
 
-### 2.8 date_rewards — 日期口令配置表
+### 2.9 date_rewards — 日期口令配置表
 
 ```sql
 CREATE TABLE IF NOT EXISTS date_rewards (
@@ -241,7 +250,7 @@ CREATE TABLE IF NOT EXISTS date_rewards (
 );
 ```
 
-### 2.9 easter_events — 彩蛋事件配置表
+### 2.10 easter_events — 彩蛋事件配置表
 
 ```sql
 CREATE TABLE IF NOT EXISTS easter_events (
@@ -254,19 +263,6 @@ CREATE TABLE IF NOT EXISTS easter_events (
     points_max INTEGER NOT NULL,
     pity_count INTEGER NOT NULL DEFAULT 0,
     is_active INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
-);
-```
-
-### 2.10 backup_configs — 备份配置表
-
-```sql
-CREATE TABLE IF NOT EXISTS backup_configs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    target_path TEXT NOT NULL,
-    schedule_time TEXT NOT NULL DEFAULT '03:00',
-    is_active INTEGER NOT NULL DEFAULT 1,
-    last_backup_time TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 ```
@@ -312,7 +308,10 @@ CREATE TABLE IF NOT EXISTS daily_keyword_claim (
     UNIQUE(kw_id, qq)
 );
 CREATE INDEX IF NOT EXISTS idx_dk_claim_group ON daily_keyword_claim(group_id, qq);
+CREATE INDEX IF NOT EXISTS idx_dk_claim_qq_date ON daily_keyword_claim(qq, created_at);
 ```
+
+> `idx_dk_claim_qq_date` 加速"每日口令按 QQ 全局限领 1 次"（v0.2.1）。
 
 ### 2.14 plugin_config — KV 运行时配置表
 
@@ -328,7 +327,7 @@ CREATE TABLE IF NOT EXISTS plugin_config (
 
 ## 3. 配置项表
 
-所有配置存储在 `plugin_config` 表中，管理员通过 `/设置` 指令动态修改，热生效。
+配置由 AstrBot 托管（`data/config/*_config.json`，WebUI 可视化），与 `/设置` 指令双向同步、热生效（`_conf_schema.json` 为唯一默认值来源）。
 
 | Key | 类型 | 默认值 | 说明 |
 |---|---|---|---|
@@ -342,16 +341,19 @@ CREATE TABLE IF NOT EXISTS plugin_config (
 | signin_consecutive_max | int | 30 | 连签天数上限 |
 | signin_consecutive_bonus_per_day | int | 5 | 连签每日递加值 |
 | signin_weekly_bonus | int | 100 | 每 7 天额外奖励 |
+| signin_refresh_time | str | 04:00 | 每日刷新时刻（签到/口令/抽奖次数等每日逻辑） |
 | **活跃奖励** | | | |
 | active_reward_enabled | bool | true | 开关 |
 | active_reward_probability | float | 0.05 | 触发概率 (0~1) |
-| active_reward_points | int | 1 | 每次奖励积分 |
+| active_reward_points_min | int | 1 | 每次奖励随机下限 |
+| active_reward_points_max | int | 5 | 每次奖励随机上限 |
 | active_reward_cooldown | int | 60 | 同用户冷却秒数 |
 | active_reward_min_length | int | 3 | 消息最小字数 |
 | active_reward_global_cooldown | int | 10 | 全群全局冷却秒数 |
 | **抽奖** | | | |
 | lottery_enabled | bool | true | 开关 |
 | lottery_cost | int | 20 | 单次消耗积分 |
+| lottery_daily_limit | int | 10 | 每日抽奖次数上限（按 QQ 全局统计） |
 | lottery_passphrase | str | "whl" | 抽奖口令 |
 | lottery_tiers | json | (见下) | 五档配置 |
 | **负分** | | | |
@@ -361,9 +363,15 @@ CREATE TABLE IF NOT EXISTS plugin_config (
 | birthday_announce_time | str | "08:00" | 每日播报时间 |
 | **备份** | | | |
 | backup_enabled | bool | true | 开关 |
+| backup_time | str | 04:00 | 每日自动备份时刻 |
+| backup_dirs | json | [] | 备份目标目录列表（相对路径基于插件数据目录） |
 | **关键词** | | | |
 | keyword_sign | json | ["签到","sign","打卡"] | 签到触发关键词列表 |
 | keyword_lottery | json | ["抽奖","lottery"] | 抽奖触发关键词列表 |
+| **指令图** | | | |
+| cmd_map_user_cooldown | int | 30 | 同用户指令图生成冷却（秒，0=不限） |
+| cmd_map_group_cooldown | int | 10 | 同群指令图生成冷却（秒，0=不限） |
+| cmd_map_cache_ttl_hours | int | 24 | 指令图缓存有效期（小时，0=禁用缓存） |
 
 ### lottery_tiers JSON 默认值
 
@@ -642,6 +650,45 @@ norm(msg) == norm("排行") or ...
 > - 每日口令/活跃奖励仍为"包含"匹配（消息内含口令关键词即命中），与触发词严格匹配不冲突。
 > - `/设置今日口令` 有保留字校验：关键词不得等于触发词或构成「口令±触发词」组合，
 >   否则该形态消息会被触发词拦截、口令永远领不到（死锁）。
+>   校验口令取自 `config_cache["lottery_passphrase"]`（动态），口令变更后保留字形态随之变化
+>   （如口令改"喵喵"后拦截 `喵喵签到`/`签到喵喵`/`喵喵抽奖`/`抽奖喵喵`）。
+
+### 7.4b 反馈信息（v0.2.2）
+
+```
+签到成功反馈：
+✅ 签到成功！获得 +10 积分
+  · 今日第 3 位签到        ← 当日签到排名（事务内 COUNT+1）
+  · 连签: 第 5 天           ← 无条件显示连签天数
+  · 当前积分: 123          ← 变动后余额（change_balance 返回值）
+  · 基础分: ...            ← 原有奖励明细保持不变
+
+抽奖反馈：
+👑 特等奖
+  · 消耗: 20 积分          ← lottery_cost
+  · 获得: +100 积分        ← lottery_reward（未中奖显示"未中奖"）
+  · 积分变化: +80          ← reward - cost（带符号）
+  · 当前积分: 1080         ← 事务内最终余额
+
+兑换成功反馈：
+兑换成功！获得 徽章 x2，消耗 200 积分
+  · 订单号: R20260802-0001   ← 事务内生成（record_no）
+  · 剩余库存: 3 (∞ 表示无限)  ← 扣减后同事务读取
+  · 积分余额: 300            ← change_balance 返回值
+  · 请联系管理员核销          ← 兑换记录待核销提示
+```
+
+### 7.4c 群昵称展示与防注入（v0.2.2）
+
+所有将群昵称/发送者昵称拼入回复文案的位置，统一经 `utils.security.clean_display_name`
+（剥离 `\x00-\x1f\x7f` 控制字符 + 去首尾空白），防止昵称构造多行伪造消息：
+
+| 位置 | 昵称来源 | 回退 |
+|---|---|---|
+| 签到运势 `utils/fortune.format_fortune` | 发送者昵称 | - |
+| 排行/签到统计 `handlers/ranking._fetch_names` | card → nickname | QQ 号 |
+| `/查生日` `handlers/birthday.query_birthday` | card → nickname | QQ 号 |
+| 活跃奖励 `handlers/active_reward` | 发送者昵称 | - |
 
 ### 7.5 负分头衔联动（v0.2.0：余额全局、头衔按群、回正全群清除）
 
@@ -819,6 +866,7 @@ async def change_balance(conn, qq, group_id, amount, reason, *,
 | 任务 | 调度方式 | Cron | 说明 |
 |---|---|---|---|
 | 备份 | APScheduler cron | `config.backup_time` | 遍历 `backup_dirs`，`VACUUM INTO` 生成一致快照到各目标 |
+| 生日播报 | APScheduler cron | `config.birthday_announce_time` | 每日定时播报当日寿星（按群，去重表防重复） |
 
 ### 定时任务注意事项
 
@@ -851,12 +899,13 @@ async def change_balance(conn, qq, group_id, amount, reason, *,
 | 库存安全 | `UPDATE redeem_items SET stock = stock - ? WHERE id=? AND (stock=-1 OR stock>=?)` |
 | 容错 | 每个 handler try-except → 记日志 → 回复用户友好提示，不崩溃 |
 | 数据完整 | 签到多步操作（积分+流水+日志）在一个事务内完成 |
-| 防重复 | 签到日期 UNIQUE 约束防同天重复 |
+| 防重复 | `sign_in_log (qq, sign_date)` 全局唯一索引 + 事务内查重（全局限签 1 次） |
 | 防滥用 | 每用户每操作独立冷却 + 全群全局冷却 |
 | 输入校验 | 积分范围检查、QQ 号数字校验、字符串截断（最长 200 字） |
+| 昵称防注入 | 所有群昵称/发送者昵称拼装点统一 `clean_display_name` 剥离控制字符（运势/排行/查生日/活跃奖励） |
 | SQL 注入 | 所有 DAO 使用 `?` 占位符，零字符串拼接 |
 | 生命周期 | `initialize()` 建表+启动任务；`terminate()` 关闭连接+清理任务 |
-| 备份 | 备份前 `wal_checkpoint`；目录不存在时自动创建 |
+| 备份 | `VACUUM INTO` 一致快照（含 WAL 数据），目标已存在自动追加序号；目录不存在时自动创建 |
 
 ---
 
@@ -908,12 +957,12 @@ async def change_balance(conn, qq, group_id, amount, reason, *,
 | 有前缀 | `/兑换` | 查看可兑换物品 | 成员 |
 | 有前缀 | `/兑换 <物品ID> [数量]` | 兑换物品 | 成员 |
 | 有前缀 | `/兑换记录 [页码]` | 查看自己的兑换记录 | 成员 |
-| 有前缀 | `/兑换记录 all [页码]` | 查看全部记录 | 管理员 |
-| 有前缀 | `/兑换记录 pending [页码]` | 查看未核销记录 | 管理员 |
+| 有前缀 | `/兑换记录 all/全部 [页码]` | 查看全部记录 | 管理员 |
+| 有前缀 | `/兑换记录 pending/未核销 [页码]` | 查看未核销记录 | 管理员 |
 | 有前缀 | `/兑换记录 <record_no>` | 查看单条详情 | 成员(自己)/管理员(全部) |
 | 有前缀 | `/流水 [页码]` | 查看自己积分流水 | 成员 |
 | 有前缀 | `/流水 @用户 [页码]` | 查看指定用户流水 | 管理员 |
-| 有前缀 | `/流水 all [页码]` | 查看全群流水 | 管理员 |
+| 有前缀 | `/流水 all/全部 [页码]` | 查看全群流水 | 管理员 |
 | 有前缀 | `/签到统计` | 今日签到数据 | 成员 |
 | 有前缀 | `/设置生日 <MM-DD / MM月DD日>` | 设置生日 | 成员 |
 | 有前缀 | `/查生日 [@用户]` | 查看生日 | 成员 |
@@ -921,14 +970,23 @@ async def change_balance(conn, qq, group_id, amount, reason, *,
 | 有前缀 | `/扣分 @用户/Q号 <分值>` | 扣除积分 | 管理员 |
 | 有前缀 | `/添加兑换 <名称> <消耗> [库存]` | 新增兑换物品 | 管理员 |
 | 有前缀 | `/删除兑换 <物品ID>` | 软删除物品 | 管理员 |
-| 有前缀 | `/修改兑换 <ID> <字段> <值>` | 修改物品属性 | 管理员 |
+| 有前缀 | `/修改兑换 <ID> <字段> <值>` | 修改物品属性（价格/库存/折扣价/折扣时间/名称/描述，支持中文，反馈全字段） | 管理员 |
 | 有前缀 | `/核销 <记录编号> [备注]` | 切换核销状态 | 管理员 |
 | 有前缀 | `/设置折扣 <ID> <折扣价> <截止时间>` | 设置兑换折扣 | 管理员 |
 | 有前缀 | `/清除折扣 <ID>` | 清除兑换折扣 | 管理员 |
-| 有前缀 | `/设置今日口令 <关键词> <积分>` | 设置每日口令 | 管理员 |
+| 有前缀 | `/设置今日口令 <关键词> <积分>` | 设置每日口令（当日已有口令时提示"已覆盖"） | 管理员 |
 | 有前缀 | `/清除今日口令` | 清除每日口令 | 管理员 |
 | 有前缀 | `/设置 <配置项> <值>` | 修改运行时配置 | 管理员 |
 | 有前缀 | `/查看配置` | 查看当前配置 | 管理员 |
+| 有前缀 | `/添加管理 <QQ号>` | 添加本群积分管理员 | 群主/全局管理员 |
+| 有前缀 | `/删除管理 <QQ号>` | 移除本群积分管理员 | 群主/全局管理员 |
+| 有前缀 | `/添加日期奖励 <MM-DD\|MM-DD~MM-DD> <关键词> <积分> [概率]` | 新增日期奖励 | 管理员 |
+| 有前缀 | `/删除日期奖励 <ID>` | 软删除日期奖励 | 管理员 |
+| 有前缀 | `/查看日期奖励` | 查看日期奖励列表 | 管理员 |
+| 有前缀 | `/清空数据` | 清空本群数据（验证码二次确认，清空前自动备份） | 管理员 |
+| 有前缀 | `/清空全部数据` | 清空全部数据（验证码二次确认） | 全局管理员 |
+| 有前缀 | `/确认清空 <验证码>` | 确认执行待清空操作（5 分钟内有效） | 发起者 |
+| 有前缀 | `/积分系统帮助` | 指令总览图（别名：指令图 / 命令图 / 帮助图） | 成员 |
 
 ---
 

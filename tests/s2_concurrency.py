@@ -3,7 +3,7 @@
 import asyncio
 import json
 
-from .common import FakeEvent, TempDB, collect
+from .common import FakeEvent, TempDB, base_cfg, collect
 
 
 async def _signin_svc(t, cfg=None):
@@ -20,16 +20,16 @@ async def _signin_svc(t, cfg=None):
         SignInService,
     )
 
-    cfg = cfg or {
-        "signin_fixed_mode": True,
-        "signin_fixed_points": 10,
-        "signin_first_bonus": 50,
-        "signin_day_first_bonus": 30,
-        "signin_consecutive_max": 30,
-        "signin_consecutive_bonus_per_day": 5,
-        "signin_weekly_bonus": 100,
-        "birthday_bonus_points": 0,
-    }
+    cfg = cfg or base_cfg(
+        signin_fixed_mode=True,
+        signin_fixed_points=10,
+        signin_first_bonus=50,
+        signin_day_first_bonus=30,
+        signin_consecutive_max=30,
+        signin_consecutive_bonus_per_day=5,
+        signin_weekly_bonus=100,
+        birthday_bonus_points=0,
+    )
     ps = PointService(t.db, t.dao)
     return SignInService(
         t.db, t.dao, ps, EasterService(t.dao), DateRewardService(t.dao), cfg

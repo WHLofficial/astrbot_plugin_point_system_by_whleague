@@ -9,7 +9,7 @@ import json
 import time
 import tracemalloc
 
-from .common import FakeEvent, TempDB, Timer, fmt_sec
+from .common import FakeEvent, TempDB, Timer, base_cfg, fmt_sec
 
 
 async def _seed_users(t, n, group="G1"):
@@ -110,16 +110,16 @@ async def bench_msg_scan():
 async def bench_signin():
     """2000 次顺序签到 + 200 并发签到吞吐。"""
     async with TempDB() as t:
-        cfg = {
-            "signin_fixed_mode": True,
-            "signin_fixed_points": 10,
-            "signin_first_bonus": 50,
-            "signin_day_first_bonus": 30,
-            "signin_consecutive_max": 30,
-            "signin_consecutive_bonus_per_day": 5,
-            "signin_weekly_bonus": 100,
-            "birthday_bonus_points": 0,
-        }
+        cfg = base_cfg(
+            signin_fixed_mode=True,
+            signin_fixed_points=10,
+            signin_first_bonus=50,
+            signin_day_first_bonus=30,
+            signin_consecutive_max=30,
+            signin_consecutive_bonus_per_day=5,
+            signin_weekly_bonus=100,
+            birthday_bonus_points=0,
+        )
         svc = await _signin_svc(t, cfg)
         timer = Timer()
         for i in range(2000):

@@ -65,6 +65,12 @@ _KEYWORD_KEYS = tuple(
 )
 _LIST_KEYS = tuple(key for key, meta in _SCHEMA.items() if meta["type"] == "list")
 
+_PROBABILITY_KEYS = (
+    "active_reward_probability",
+    "easter_lucky_probability",
+    "easter_unlucky_probability",
+)
+
 
 def parse_keyword_list(raw):
     """将配置中的关键词解析为列表，兼容 JSON 数组或逗号分隔文本。"""
@@ -180,7 +186,7 @@ def validate_and_cast(key: str, raw: str):
             parsed = float(raw.strip())
         except ValueError:
             raise ValueError(f"\u914d\u7f6e {key} \u9700\u4e3a\u6570\u5b57")
-        if key == "active_reward_probability" and not (0.0 <= parsed <= 1.0):
-            raise ValueError("active_reward_probability \u9700\u5728 0~1 \u4e4b\u95f4")
+        if key in _PROBABILITY_KEYS and not (0.0 <= parsed <= 1.0):
+            raise ValueError(f"{key} \u9700\u5728 0~1 \u4e4b\u95f4")
         return parsed
     return raw

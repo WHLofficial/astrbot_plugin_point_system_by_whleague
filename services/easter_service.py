@@ -8,7 +8,15 @@ class EasterService:
         self._dao = dao
 
     async def trigger(
-        self, qq: str, group_id: str, lucky_pity: int, unlucky_pity: int
+        self,
+        qq: str,
+        group_id: str,
+        lucky_pity: int,
+        unlucky_pity: int,
+        lucky_probability: float,
+        unlucky_probability: float,
+        lucky_pity_count: int,
+        unlucky_pity_count: int,
     ) -> dict:
         """计算彩蛋结果与新的保底计数，不写库（写入由调用方在事务内完成）。"""
         events = await self._dao.get_active_easter_events()
@@ -17,11 +25,9 @@ class EasterService:
 
         new_lucky_pity = lucky_pity + 1
         new_unlucky_pity = unlucky_pity + 1
-        max_lucky_pity = max((e["pity_count"] for e in lucky_events), default=0)
-        max_unlucky_pity = max((e["pity_count"] for e in unlucky_events), default=0)
 
-        force_lucky = max_lucky_pity > 0 and new_lucky_pity >= max_lucky_pity
-        force_unlucky = max_unlucky_pity > 0 and new_unlucky_pity >= max_unlucky_pity
+        force_lucky = lucky_pity_count > 0 and new_lucky_pity >= lucky_pity_count
+        force_unlucky = unlucky_pity_count > 0 and new_unlucky_pity >= unlucky_pity_count
 
         selected = None
         reset_lucky = False
@@ -34,15 +40,12 @@ class EasterService:
             selected = random.choice(unlucky_events) if unlucky_events else None
             reset_unlucky = True
         else:
-            lucky_prob = sum(e["probability"] for e in lucky_events)
-            unlucky_prob = sum(e["probability"] for e in unlucky_events)
-
-            if lucky_events and random.random() < lucky_prob:
+            if lucky_events and random.random() < lucky_probability:
                 selected = random.choices(
                     lucky_events, weights=[e["probability"] for e in lucky_events]
                 )[0]
                 reset_lucky = True
-            elif unlucky_events and random.random() < unlucky_prob:
+            elif unlucky_events and random.random() < unlucky_probability:
                 selected = random.choices(
                     unlucky_events, weights=[e["probability"] for e in unlucky_events]
                 )[0]

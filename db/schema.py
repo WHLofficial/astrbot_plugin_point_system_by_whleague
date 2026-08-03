@@ -347,19 +347,19 @@ async def _seed_default_easter_events(db):
             "lucky",
             "\u6b27\u7687\u964d\u4e34",
             "\u7b7e\u5230\u89e6\u53d1\u6b27\u7687\u4e8b\u4ef6\uff0c\u83b7\u5f97\u5927\u91cf\u79ef\u5206\uff01",
-            0.02,
+            0.005,
             50,
             200,
-            10,
+            200,
         ),
         (
             "unlucky",
             "\u975e\u8457\u9644\u4f53",
             "\u7b7e\u5230\u89e6\u53d1\u975e\u8457\u4e8b\u4ef6\uff0c\u4e22\u5931\u5927\u91cf\u79ef\u5206\u2026",
-            0.03,
+            0.005,
             -200,
             -50,
-            15,
+            200,
         ),
     ]
     # 不在函数内提交：由调用方在同一事务内完成，或在其后显式 commit

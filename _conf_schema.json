@@ -53,6 +53,30 @@
     "type": "int",
     "default": 100
   },
+  "easter_lucky_probability": {
+    "description": "欧皇彩蛋触发概率",
+    "hint": "每次签到触发欧皇彩蛋事件的概率，0~1 之间的小数。",
+    "type": "float",
+    "default": 0.005
+  },
+  "easter_lucky_pity_count": {
+    "description": "欧皇彩蛋保底次数",
+    "hint": "连续签到达到该次数时必定触发欧皇彩蛋事件，0 表示关闭欧皇保底。",
+    "type": "int",
+    "default": 200
+  },
+  "easter_unlucky_probability": {
+    "description": "非酋彩蛋触发概率",
+    "hint": "每次签到触发非酋彩蛋事件的概率，0~1 之间的小数。",
+    "type": "float",
+    "default": 0.005
+  },
+  "easter_unlucky_pity_count": {
+    "description": "非酋彩蛋保底次数",
+    "hint": "连续签到达到该次数时必定触发非酋彩蛋事件，0 表示关闭非酋保底。",
+    "type": "int",
+    "default": 200
+  },
   "active_reward_enabled": {
     "description": "启用活跃奖励",
     "hint": "群内发消息是否可能触发活跃奖励。",

@@ -87,7 +87,14 @@ class SignInService:
             total_points += bonus_weekly
 
         easter = await self._easter.trigger(
-            qq, group_id, account["lucky_pity"], account["unlucky_pity"]
+            qq,
+            group_id,
+            account["lucky_pity"],
+            account["unlucky_pity"],
+            cfg["easter_lucky_probability"],
+            cfg["easter_unlucky_probability"],
+            cfg["easter_lucky_pity_count"],
+            cfg["easter_unlucky_pity_count"],
         )
         easter_result = easter["event"]
         new_lucky_pity = easter["lucky_pity"]

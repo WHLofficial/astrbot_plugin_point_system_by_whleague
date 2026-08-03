@@ -10,18 +10,18 @@ async def test_signin_fixed_mode():
         await t.db.execute(
             "UPDATE easter_events SET is_active=0"
         )  # 停用彩蛋，精确断言积分
-        cfg = {
-            "signin_fixed_mode": True,
-            "signin_fixed_points": 10,
-            "signin_random_min": 1,
-            "signin_random_max": 20,
-            "signin_first_bonus": 50,
-            "signin_day_first_bonus": 30,
-            "signin_consecutive_max": 30,
-            "signin_consecutive_bonus_per_day": 5,
-            "signin_weekly_bonus": 100,
-            "birthday_bonus_points": 100,
-        }
+        cfg = base_cfg(
+            signin_fixed_mode=True,
+            signin_fixed_points=10,
+            signin_random_min=1,
+            signin_random_max=20,
+            signin_first_bonus=50,
+            signin_day_first_bonus=30,
+            signin_consecutive_max=30,
+            signin_consecutive_bonus_per_day=5,
+            signin_weekly_bonus=100,
+            birthday_bonus_points=100,
+        )
         from astrbot_plugin_point_system_by_whleague.services.date_reward_service import (
             DateRewardService,
         )
@@ -66,18 +66,18 @@ async def test_signin_fixed_mode():
 async def test_signin_random_mode():
     async with TempDB() as t:
         await t.db.execute("UPDATE easter_events SET is_active=0")
-        cfg = {
-            "signin_fixed_mode": False,
-            "signin_fixed_points": 10,
-            "signin_random_min": 1,
-            "signin_random_max": 20,
-            "signin_first_bonus": 0,
-            "signin_day_first_bonus": 0,
-            "signin_consecutive_max": 30,
-            "signin_consecutive_bonus_per_day": 0,
-            "signin_weekly_bonus": 0,
-            "birthday_bonus_points": 0,
-        }
+        cfg = base_cfg(
+            signin_fixed_mode=False,
+            signin_fixed_points=10,
+            signin_random_min=1,
+            signin_random_max=20,
+            signin_first_bonus=0,
+            signin_day_first_bonus=0,
+            signin_consecutive_max=30,
+            signin_consecutive_bonus_per_day=0,
+            signin_weekly_bonus=0,
+            birthday_bonus_points=0,
+        )
         from astrbot_plugin_point_system_by_whleague.services.date_reward_service import (
             DateRewardService,
         )
@@ -104,16 +104,16 @@ async def test_signin_random_mode():
 async def test_signin_day_first_and_streak():
     async with TempDB() as t:
         await t.db.execute("UPDATE easter_events SET is_active=0")
-        cfg = {
-            "signin_fixed_mode": True,
-            "signin_fixed_points": 10,
-            "signin_first_bonus": 0,
-            "signin_day_first_bonus": 30,
-            "signin_consecutive_max": 30,
-            "signin_consecutive_bonus_per_day": 5,
-            "signin_weekly_bonus": 100,
-            "birthday_bonus_points": 0,
-        }
+        cfg = base_cfg(
+            signin_fixed_mode=True,
+            signin_fixed_points=10,
+            signin_first_bonus=0,
+            signin_day_first_bonus=30,
+            signin_consecutive_max=30,
+            signin_consecutive_bonus_per_day=5,
+            signin_weekly_bonus=100,
+            birthday_bonus_points=0,
+        )
         from astrbot_plugin_point_system_by_whleague.services.date_reward_service import (
             DateRewardService,
         )
@@ -492,6 +492,26 @@ async def test_config_validate_full():
             raise AssertionError(bad)
         except ValueError:
             pass
+    for key in ("easter_lucky_probability", "easter_unlucky_probability"):
+        assert validate_and_cast(key, "0.005") == 0.005
+        assert validate_and_cast(key, "0") == 0.0
+        assert validate_and_cast(key, "1") == 1.0
+        for bad in ("-0.1", "1.5"):
+            try:
+                validate_and_cast(key, bad)
+                raise AssertionError((key, bad))
+            except ValueError:
+                pass
+    # 彩蛋保底：非负整数，0 表示关闭保底
+    for key in ("easter_lucky_pity_count", "easter_unlucky_pity_count"):
+        assert validate_and_cast(key, "200") == 200
+        assert validate_and_cast(key, "0") == 0
+        for bad in ("-1", "abc", "1.5"):
+            try:
+                validate_and_cast(key, bad)
+                raise AssertionError((key, bad))
+            except ValueError:
+                pass
     # 非负整数
     for bad in ("-1", "abc", "1.5"):
         try:

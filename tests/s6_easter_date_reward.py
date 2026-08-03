@@ -11,7 +11,16 @@ async def test_easter_no_events():
         )
 
         svc = EasterService(t.dao)
-        r = await svc.trigger("u1", "G1", 0, 0)
+        r = await svc.trigger(
+            "u1",
+            "G1",
+            0,
+            0,
+            lucky_probability=0.005,
+            unlucky_probability=0.005,
+            lucky_pity_count=200,
+            unlucky_pity_count=200,
+        )
         assert r["event"] is None
         assert r["lucky_pity"] == 1 and r["unlucky_pity"] == 1
     return "彩蛋：无事件时 event=None 且保底计数递增"
@@ -24,21 +33,48 @@ async def test_easter_probability_branches():
         )
 
         svc = EasterService(t.dao)
-        # 概率命中 lucky（lucky_prob=0.02，unlucky_prob=0.03）
+        # 概率命中 lucky（lucky_probability=0.02，unlucky_probability=0.03）
         with patch_random(random=0.01):
-            r = await svc.trigger("u1", "G1", 0, 0)
+            r = await svc.trigger(
+                "u1",
+                "G1",
+                0,
+                0,
+                lucky_probability=0.02,
+                unlucky_probability=0.03,
+                lucky_pity_count=200,
+                unlucky_pity_count=200,
+            )
             assert r["event"]["event_type"] == "lucky"
             assert 50 <= r["event"]["points"] <= 200
             assert r["lucky_pity"] == 0 and r["unlucky_pity"] == 1
         # 概率命中 unlucky
         with patch_random(random=0.025):
-            r = await svc.trigger("u1", "G1", 0, 0)
+            r = await svc.trigger(
+                "u1",
+                "G1",
+                0,
+                0,
+                lucky_probability=0.02,
+                unlucky_probability=0.03,
+                lucky_pity_count=200,
+                unlucky_pity_count=200,
+            )
             assert r["event"]["event_type"] == "unlucky"
             assert -200 <= r["event"]["points"] <= -50
             assert r["lucky_pity"] == 1 and r["unlucky_pity"] == 0
         # 概率未命中：仅递增
         with patch_random(random=0.99):
-            r = await svc.trigger("u1", "G1", 2, 2)
+            r = await svc.trigger(
+                "u1",
+                "G1",
+                2,
+                2,
+                lucky_probability=0.02,
+                unlucky_probability=0.03,
+                lucky_pity_count=200,
+                unlucky_pity_count=200,
+            )
             assert r["event"] is None
             assert r["lucky_pity"] == 3 and r["unlucky_pity"] == 3
     return "彩蛋：概率命中 lucky/unlucky、未命中仅递增"
@@ -50,29 +86,47 @@ async def test_easter_pity_force():
             EasterService,
         )
 
-        await t.db.execute(
-            "UPDATE easter_events SET pity_count=CASE WHEN event_type='lucky' THEN 2 ELSE 15 END"
-        )
         svc = EasterService(t.dao)
-        # 保底触发 lucky：new_lucky_pity(2) >= max_lucky_pity(2)
+        # 保底触发 lucky：new_lucky_pity(2) >= lucky_pity_count(2)
         with patch_random(random=0.99):  # 概率必不中，验证保底强制
-            r = await svc.trigger("u1", "G1", 1, 0)
+            r = await svc.trigger(
+                "u1",
+                "G1",
+                1,
+                0,
+                lucky_probability=0.02,
+                unlucky_probability=0.03,
+                lucky_pity_count=2,
+                unlucky_pity_count=15,
+            )
             assert r["event"]["event_type"] == "lucky"
             assert r["lucky_pity"] == 0
         # 保底触发 unlucky
-        await t.db.execute(
-            "UPDATE easter_events SET pity_count=CASE WHEN event_type='lucky' THEN 10 ELSE 3 END"
-        )
         with patch_random(random=0.99):
-            r = await svc.trigger("u1", "G1", 0, 2)
+            r = await svc.trigger(
+                "u1",
+                "G1",
+                0,
+                2,
+                lucky_probability=0.02,
+                unlucky_probability=0.03,
+                lucky_pity_count=10,
+                unlucky_pity_count=3,
+            )
             assert r["event"]["event_type"] == "unlucky"
             assert r["unlucky_pity"] == 0
         # 双保底同时满足：lucky 优先
-        await t.db.execute(
-            "UPDATE easter_events SET pity_count=CASE WHEN event_type='lucky' THEN 2 ELSE 3 END"
-        )
         with patch_random(random=0.99):
-            r = await svc.trigger("u1", "G1", 1, 2)
+            r = await svc.trigger(
+                "u1",
+                "G1",
+                1,
+                2,
+                lucky_probability=0.02,
+                unlucky_probability=0.03,
+                lucky_pity_count=2,
+                unlucky_pity_count=3,
+            )
             assert r["event"]["event_type"] == "lucky"
     return "彩蛋：lucky/unlucky 保底强制触发与重置、双保底 lucky 优先"
 
@@ -92,9 +146,56 @@ async def test_easter_weighted_choice():
         svc = EasterService(t.dao)
         # choices 返回"大欧"事件：验证权重选择落到对应事件
         with patch_random(random=0.01, choices=dict(row)):
-            r = await svc.trigger("u1", "G1", 0, 0)
+            r = await svc.trigger(
+                "u1",
+                "G1",
+                0,
+                0,
+                lucky_probability=1.0,
+                unlucky_probability=0.005,
+                lucky_pity_count=200,
+                unlucky_pity_count=200,
+            )
             assert r["event"]["name"] == "大欧" and r["event"]["points"] == 99
     return "彩蛋：同类型多事件按权重选择"
+
+
+async def test_easter_default_pity_no_force():
+    async with TempDB() as t:
+        from astrbot_plugin_point_system_by_whleague.services.easter_service import (
+            EasterService,
+        )
+
+        svc = EasterService(t.dao)
+        # 默认保底 200：遗留高计数（90）不触发强制事件，仅递增
+        with patch_random(random=0.99):
+            r = await svc.trigger(
+                "u1",
+                "G1",
+                90,
+                90,
+                lucky_probability=0.005,
+                unlucky_probability=0.005,
+                lucky_pity_count=200,
+                unlucky_pity_count=200,
+            )
+            assert r["event"] is None
+            assert r["lucky_pity"] == 91 and r["unlucky_pity"] == 91
+        # 保底关闭（0）：计数再高也不强制
+        with patch_random(random=0.99):
+            r = await svc.trigger(
+                "u1",
+                "G1",
+                90,
+                90,
+                lucky_probability=0.005,
+                unlucky_probability=0.005,
+                lucky_pity_count=0,
+                unlucky_pity_count=0,
+            )
+            assert r["event"] is None
+            assert r["lucky_pity"] == 91 and r["unlucky_pity"] == 91
+    return "彩蛋：默认/关闭保底下遗留高计数不触发强制事件"
 
 
 async def test_easter_signin_lucky_integration():
@@ -121,6 +222,7 @@ async def test_easter_signin_lucky_integration():
             signin_consecutive_bonus_per_day=5,
             signin_weekly_bonus=100,
             birthday_bonus_points=0,
+            easter_lucky_probability=0.02,
         )
         svc = SignInService(
             t.db,
@@ -168,6 +270,8 @@ async def test_easter_signin_unlucky_integration():
             signin_consecutive_bonus_per_day=5,
             signin_weekly_bonus=100,
             birthday_bonus_points=0,
+            easter_lucky_probability=0.02,
+            easter_unlucky_probability=0.03,
         )
         svc = SignInService(
             t.db,
@@ -284,6 +388,7 @@ TESTS = [
     ("easter_probability_branches", test_easter_probability_branches),
     ("easter_pity_force", test_easter_pity_force),
     ("easter_weighted_choice", test_easter_weighted_choice),
+    ("easter_default_pity_no_force", test_easter_default_pity_no_force),
     ("easter_signin_lucky", test_easter_signin_lucky_integration),
     ("easter_signin_unlucky", test_easter_signin_unlucky_integration),
     ("date_reward_check", test_date_reward_check_branches),

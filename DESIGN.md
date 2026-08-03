@@ -1,6 +1,6 @@
 # 积分系统插件 — 完整设计文档
 
-> 版本: v1.3  
+> 版本: v1.4  
 > 更新时间: 2026-08-03
 
 ---
@@ -45,6 +45,7 @@
 | 18 | **反馈增强（v0.2.2）** | 签到反馈含当日排名/连签/当前积分；抽奖反馈含消耗/积分变化/当前积分；兑换反馈含订单号/剩余库存/积分余额/核销提示；`/查生日` 显示群昵称 |
 | 19 | **我的积分（v0.3.0）** | 无前缀关键词「我的积分 / 积分查询」，展示群昵称+QQ / 当前积分 / 累计签到 / 连签 / 今日签到 / 本群排名 / 最近 5 条本群流水 |
 | 20 | **打劫（v0.4.0）** | 无前缀「打劫 @目标」（At 段解析，排除 AtAll 与 bot 自身），成功抢得目标部分积分（凸曲线收益公式），失败扣成本；同用户冷却 + 每日上限防刷；目标可被抢成负分并联动负分头衔 |
+| 21 | **打劫防集火（v0.4.2）** | 目标每日被劫上限（全部次数口径，按 QQ 全局）+ 收益衰减（每被成功打劫一次后续收益递减），防止高积分玩家被集火掠夺 |
 
 ---
 
@@ -403,6 +404,8 @@ CREATE INDEX IF NOT EXISTS idx_rob_target ON rob_records(target_qq);
 | rob_target_min_points | int | 50 | 目标积分门槛 |
 | rob_cooldown | int | 600 | 同用户打劫冷却秒数（0=不限，成功/失败均进入） |
 | rob_daily_limit | int | 3 | 每日打劫次数上限（按 QQ 全局统计，0=不限） |
+| rob_target_daily_limit | int | 6 | 目标每日被劫次数上限（按 target_qq 全局跨群统计，成功与失败均计数，0=不限） |
+| rob_reward_decay | float | 0.25 | 打劫收益衰减比例：目标每被**成功**打劫一次，后续收益 ×(1-decay)^n（0~1，0=不衰减；目标上限关闭时仍生效） |
 | keyword_rob | json | ["打劫"] | 打劫触发关键词（注意：修改后需同步 main.py 的 on_rob 粗筛正则） |
 | **负分** | | | |
 | negative_disable_lottery | bool | true | 负分禁止抽奖 |
@@ -958,16 +961,21 @@ rob(qq, target_qq, group_id, bot=None):
   # 3. 目标门槛：target_balance >= rob_target_min_points 且非负分
   # 4. 用户冷却（rate_limiter，key="rob"）→ 拦截时返回剩余秒数供提示
   # 5. execute_transaction(_tx)：
-  #    a. 每日次数：COUNT rob_records WHERE qq AND created_at >= period_start_str()
+  #    a. 打劫者每日次数：COUNT rob_records WHERE qq AND created_at >= period_start_str()
   #       （按 QQ 全局统计，与抽奖口径一致）
-  #    b. SELECT 目标余额（事务内，max(负,0) 防御并发扣负；与扣分同源防偏差）
-  #    c. success = random() < rob_success_rate
-  #    d. 成功分支：stolen = min(cap, fixed + round(fixed * (target/base) ** power))
+  #    b. 目标防集火：target_robs_today(conn, target_qq) → (总次数, 成功次数)（一次查询）
+  #       - 上限：总次数（全部次数口径，含失败）>= rob_target_daily_limit 时拒绝
+  #         （"目标今日已被打劫 X 次，无法再被打劫"，事务回滚，冷却已消耗）
+  #       - 衰减：成功次数 win_hits（仅成功口径）用于收益递减
+  #    c. SELECT 目标余额（事务内，max(负,0) 防御并发扣负；与扣分同源防偏差）
+  #    d. success = random() < rob_success_rate
+  #    e. 成功分支：stolen = min(cap, fixed + round(fixed * (target/base) ** power))
+  #       → 若 decay>0 且 win_hits>0：stolen = round(stolen * (1-decay) ** win_hits)
   #       → change_balance(+stolen, "rob_reward")；目标 change_balance(-stolen, "rob_lost",
   #       earned_amount=0)（允许扣负；stolen=0 极端配置时跳过 change_balance 防 amount=0 报错）
   #       失败分支：change_balance(-cost, "rob_cost", earned_amount=0, guard_balance=cost)
   #       （守卫失败抛 RobError 整事务回滚）
-  #    e. INSERT rob_records（cost=配置成本, stolen, success）
+  #    f. INSERT rob_records（cost=配置成本, stolen, success）
   # 6. ensure_negative_title(qq) 与 ensure_negative_title(target_qq)（负分头衔联动）
   # 7. 返回 success/stolen/balance/target_balance 等字段供 handler 格式化
 ```
@@ -1031,7 +1039,7 @@ rob(qq, target_qq, group_id, bot=None):
 | 容错 | 每个 handler try-except → 记日志 → 回复用户友好提示，不崩溃 |
 | 数据完整 | 签到多步操作（积分+流水+日志）在一个事务内完成 |
 | 防重复 | `sign_in_log (qq, sign_date)` 全局唯一索引 + 事务内查重（全局限签 1 次） |
-| 防滥用 | 每用户每操作独立冷却 + 全群全局冷却；打劫另有每日上限（按 QQ 全局）+ 口令保留字防「打劫=口令」双收益 |
+| 防滥用 | 每用户每操作独立冷却 + 全群全局冷却；打劫另有打劫者每日上限（按 QQ 全局）+ 目标每日被劫上限（防集火，全部次数口径）+ 收益衰减（成功次数口径）+ 口令保留字防「打劫=口令」双收益 |
 | 输入校验 | 积分范围检查、QQ 号数字校验、字符串截断（最长 200 字） |
 | 昵称防注入 | 所有群昵称/发送者昵称拼装点统一 `clean_display_name` 剥离控制字符（运势/排行/查生日/活跃奖励/打劫） |
 | SQL 注入 | 所有 DAO 使用 `?` 占位符，零字符串拼接 |

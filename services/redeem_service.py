@@ -129,6 +129,121 @@ class RedeemService:
             "msg": msg,
         }
 
+    async def set_record_status(
+        self,
+        record_no: str,
+        action: str,
+        admin_qq: str,
+        group_id: str,
+        note: str = "",
+    ) -> dict:
+        """核销/驳回兑换订单（三态：pending/verified/rejected，可互切）。
+
+        驳回：事务内退回兑换消耗积分（reason=redeem_refund，不计累计获得）并恢复库存；
+        驳回→通过：重新扣除积分（允许余额为负）并扣减库存（有限库存不足则操作失败）。
+
+        Args:
+            record_no: 记录编号。
+            action: 目标状态，verified（通过）或 rejected（驳回）。
+            admin_qq: 操作管理员 QQ。
+            group_id: 操作所在群（流水审计维度）。
+            note: 备注（驳回原因等）。
+
+        Returns:
+            dict：success / msg / changed / status / record。
+        """
+        record = await self._dao.get_redeem_record(record_no)
+        if not record:
+            return {"success": False, "msg": f"记录 {record_no} 不存在"}
+
+        if action not in ("verified", "rejected"):
+            return {"success": False, "msg": f"无效操作: {action}"}
+
+        target = action
+        if record["status"] == target:
+            text = "已是通过状态" if target == "verified" else "已是驳回状态"
+            return {"success": True, "msg": f"记录 {record_no} {text}", "changed": False}
+
+        item_cost = record["item_cost"]
+        quantity = record["quantity"]
+        qq = record["qq"]
+        item_id = record["item_id"]
+        record_id = record["id"]
+        refund_amount = item_cost
+
+        async def _tx(conn):
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            # 条件状态迁移：仅当仍处于预读状态时生效，防止并发重复处理
+            if target == "rejected":
+                async with conn.execute(
+                    "UPDATE redeem_records SET status='rejected', rejected_at=?, rejected_by=?, "
+                    "verified_at=NULL, verified_by=NULL, admin_note=? WHERE record_no=? AND status=?",
+                    (now, admin_qq, note, record_no, record["status"]),
+                ) as cur:
+                    if cur.rowcount == 0:
+                        raise ValueError("记录状态已变更，请刷新后重试")
+                # 通过 → 驳回：退回积分 + 恢复库存
+                await PointService.change_balance(
+                    conn,
+                    qq,
+                    group_id,
+                    refund_amount,
+                    "redeem_refund",
+                    earned_amount=0,
+                    ref_id=record_id,
+                    admin_qq=admin_qq,
+                )
+                await conn.execute(
+                    "UPDATE redeem_items SET stock=CASE WHEN stock=-1 THEN -1 ELSE stock+? END "
+                    "WHERE id=?",
+                    (quantity, item_id),
+                )
+            else:
+                async with conn.execute(
+                    "UPDATE redeem_records SET status='verified', verified_at=?, verified_by=?, "
+                    "rejected_at=NULL, rejected_by=NULL, admin_note=? WHERE record_no=? AND status=?",
+                    (now, admin_qq, note, record_no, record["status"]),
+                ) as cur:
+                    if cur.rowcount == 0:
+                        raise ValueError("记录状态已变更，请刷新后重试")
+                if record["status"] == "rejected":
+                    # 驳回 → 通过：库存守卫（不足失败）后重新扣分（允许余额为负）
+                    async with conn.execute(
+                        "UPDATE redeem_items SET stock=CASE WHEN stock=-1 THEN -1 ELSE stock-? END "
+                        "WHERE id=? AND (stock=-1 OR stock>=?)",
+                        (quantity, item_id, quantity),
+                    ) as cur:
+                        if cur.rowcount == 0:
+                            raise ValueError("库存不足，无法改回通过")
+                    await PointService.change_balance(
+                        conn,
+                        qq,
+                        group_id,
+                        -refund_amount,
+                        "redeem_cost",
+                        earned_amount=0,
+                        ref_id=record_id,
+                        admin_qq=admin_qq,
+                    )
+
+        try:
+            await self._db.execute_transaction(_tx)
+        except ValueError as e:
+            return {"success": False, "msg": str(e)}
+
+        status_text = "✅ 已核销" if target == "verified" else "❌ 已驳回"
+        note_text = f"（{note}）" if note else ""
+        logger.info(
+            f"Redeem record {record_no} {record['status']} -> {target} by {admin_qq}"
+        )
+        return {
+            "success": True,
+            "msg": f"记录 {record_no} 状态已修改为: {status_text}{note_text}",
+            "changed": True,
+            "status": target,
+            "record": record,
+        }
+
     async def set_discount(
         self, item_id: int, discount_price: int, end_time: str
     ) -> dict:

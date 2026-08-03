@@ -402,15 +402,35 @@ class PointSystemPlugin(Star):
         self, event: AstrMessageEvent
     ) -> AsyncGenerator[MessageEventResult, None]:
         msg = event.get_message_str()
-        parts = msg.split(maxsplit=2)
+        parts = msg.split(maxsplit=3)
         if len(parts) < 2:
             yield event.plain_result(
-                "\u7528\u6cd5: /\u6838\u9500 <\u8bb0\u5f55\u7f16\u53f7> [\u5907\u6ce8]"
+                "\u7528\u6cd5: /\u6838\u9500 [\u901a\u8fc7|\u9a73\u56de] <\u8bb0\u5f55\u7f16\u53f7> [\u5907\u6ce8]"
             )
             return
+        action = "verified"
         record_no = parts[1]
         note = parts[2] if len(parts) >= 3 else ""
-        async for r in self.redeem_handler.toggle_verify(event, record_no, note):
+        p1 = parts[1].lower()
+        if p1 in ("\u901a\u8fc7", "pass"):
+            action = "verified"
+            if len(parts) < 3:
+                yield event.plain_result(
+                    "\u7528\u6cd5: /\u6838\u9500 [\u901a\u8fc7|\u9a73\u56de] <\u8bb0\u5f55\u7f16\u53f7> [\u5907\u6ce8]"
+                )
+                return
+            record_no = parts[2]
+            note = parts[3] if len(parts) >= 4 else ""
+        elif p1 in ("\u9a73\u56de", "reject"):
+            action = "rejected"
+            if len(parts) < 3:
+                yield event.plain_result(
+                    "\u7528\u6cd5: /\u6838\u9500 [\u901a\u8fc7|\u9a73\u56de] <\u8bb0\u5f55\u7f16\u53f7> [\u5907\u6ce8]"
+                )
+                return
+            record_no = parts[2]
+            note = parts[3] if len(parts) >= 4 else ""
+        async for r in self.redeem_handler.verify_record(event, record_no, action, note):
             yield r
 
     @filter.command("\u6dfb\u52a0\u5151\u6362")

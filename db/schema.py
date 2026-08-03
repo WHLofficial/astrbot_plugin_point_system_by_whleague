@@ -1,6 +1,6 @@
 from astrbot.api import logger
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 SQL_CREATE_TABLES = r"""
 
@@ -110,7 +110,9 @@ CREATE TABLE IF NOT EXISTS redeem_records (
     admin_note TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
     verified_at TEXT,
-    verified_by TEXT
+    verified_by TEXT,
+    rejected_at TEXT,
+    rejected_by TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_redeem_records_qq ON redeem_records(qq);
@@ -304,6 +306,18 @@ async def _migrate(db, current_version: int):
 
     if current_version < 3:
         await _migrate_v3(db)
+
+    if current_version < 4:
+        cols = await _table_columns(db, "redeem_records")
+        if "rejected_at" not in cols:
+            await db.execute(
+                "ALTER TABLE redeem_records ADD COLUMN rejected_at TEXT"
+            )
+        if "rejected_by" not in cols:
+            await db.execute(
+                "ALTER TABLE redeem_records ADD COLUMN rejected_by TEXT"
+            )
+        await db.commit()
 
 
 async def _migrate_v3(db) -> None:

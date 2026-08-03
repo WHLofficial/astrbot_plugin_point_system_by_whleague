@@ -152,9 +152,9 @@ _COMMAND_SECTIONS = [
             },
             {
                 "trigger": "command",
-                "name": "/核销 <记录编号> [备注]",
-                "usage": "/核销 R20260101-0001 已发货",
-                "desc": "切换核销状态（pending ↔ verified）",
+                "name": "/核销 [通过|驳回] <记录编号> [备注]",
+                "usage": "/核销 驳回 R20260101-0001 无货",
+                "desc": "核销/驳回兑换订单并 @ 通知兑换者（未写动作默认通过，驳回退回积分）",
             },
             {
                 "trigger": "command",

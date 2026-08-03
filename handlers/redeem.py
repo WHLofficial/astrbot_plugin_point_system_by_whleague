@@ -1,7 +1,7 @@
 from collections.abc import AsyncGenerator
 
 from astrbot.api import logger
-from astrbot.api.event import MessageEventResult
+from astrbot.api.event import MessageChain, MessageEventResult
 
 from ..utils.security import parse_int, sanitize_text
 
@@ -90,7 +90,11 @@ class RedeemHandler:
                 status_text = (
                     "\u2714 \u5df2\u6838\u9500"
                     if record["status"] == "verified"
-                    else "\u23f3 \u672a\u6838\u9500"
+                    else (
+                        "\u274c \u5df2\u9a73\u56de"
+                        if record["status"] == "rejected"
+                        else "\u23f3 \u672a\u6838\u9500"
+                    )
                 )
                 lines = [
                     f"\U0001f4cb \u5151\u6362\u8bb0\u5f55 {record['record_no']}",
@@ -129,7 +133,12 @@ class RedeemHandler:
 
             lines = [f"\U0001f4cb \u5151\u6362\u8bb0\u5f55 (\u7b2c{page}\u9875)"]
             for r in records:
-                status_icon = "\u2714" if r["status"] == "verified" else "\u23f3"
+                if r["status"] == "verified":
+                    status_icon = "\u2714"
+                elif r["status"] == "rejected":
+                    status_icon = "\u274c"
+                else:
+                    status_icon = "\u23f3"
                 lines.append(
                     f"{status_icon} {r['record_no']} {r['item_name']}x{r['quantity']} {r['item_cost']}\u79ef\u5206"
                 )
@@ -140,8 +149,8 @@ class RedeemHandler:
                 "\u67e5\u8be2\u5931\u8d25\uff0c\u5df2\u8bb0\u5f55\u9519\u8bef"
             )
 
-    async def toggle_verify(
-        self, event, record_no: str, note: str = ""
+    async def verify_record(
+        self, event, record_no: str, action: str, note: str = ""
     ) -> AsyncGenerator[MessageEventResult, None]:
         try:
             qq = event.get_sender_id()
@@ -151,29 +160,67 @@ class RedeemHandler:
                 )
                 return
 
+            note = sanitize_text(note)
             record = await self._plugin.dao.get_redeem_record(record_no)
             if not record:
                 yield event.plain_result(f"\u8bb0\u5f55 {record_no} \u4e0d\u5b58\u5728")
                 return
             if record["group_id"] != event.get_group_id():
                 yield event.plain_result(
-                    "\u4f60\u65e0\u6743\u6838\u9500\u5176\u4ed6\u7fa4\u7684\u8bb0\u5f55"
+                    "\u4f60\u65e0\u6743\u5904\u7406\u5176\u4ed6\u7fa4\u7684\u8bb0\u5f55"
                 )
                 return
 
-            new_status = await self._plugin.dao.toggle_redeem_status(
-                record_no, qq, sanitize_text(note)
+            result = await self._plugin.redeem_service.set_record_status(
+                record_no,
+                action,
+                qq,
+                event.get_group_id(),
+                note,
             )
-            status_text = (
-                "\u2714 \u5df2\u6838\u9500"
-                if new_status == "verified"
-                else "\u23f3 \u5df2\u53d6\u6d88\u6838\u9500"
-            )
-            yield event.plain_result(
-                f"\u8bb0\u5f55 {record_no} \u72b6\u6001\u5df2\u66f4\u6539\u4e3a: {status_text}"
+            yield event.plain_result(result["msg"])
+            if not (result["success"] and result["changed"]):
+                return
+
+            # 状态变更成功：@ 通知兑换者；发送失败时向当前会话发警告
+            cost = record["item_cost"]
+            if result["status"] == "verified":
+                notify = (
+                    f"\u2705 \u4f60\u7684\u5151\u6362\u8ba2\u5355 {record_no}"
+                    f"\uff08{record['item_name']} x{record['quantity']}\uff09"
+                    f"\u5df2\u901a\u8fc7\u6838\u9500{note}"
+                )
+                warn = f"\u26a0\ufe0f \u8ba2\u5355 {record_no} \u5df2\u901a\u8fc7\u6838\u9500\uff0c\u4f46\u901a\u77e5\u5151\u6362\u8005\u5931\u8d25\uff08\u53ef\u80fd\u5df2\u4e0d\u5728\u672c\u7fa4\uff09\uff0c\u8bf7\u7ebf\u4e0b\u8054\u7cfb"
+            else:
+                reason = f"\uff08\u7ba1\u7406\u5458\u9a73\u56de\uff1a{note}\uff09" if note else "\uff08\u7ba1\u7406\u5458\u9a73\u56de\uff09"
+                notify = (
+                    f"\u274c \u4f60\u7684\u5151\u6362\u8ba2\u5355 {record_no}"
+                    f"\uff08{record['item_name']} x{record['quantity']}\uff09"
+                    f"\u5df2\u88ab\u9a73\u56de\uff0c\u6d88\u8017\u7684 {cost} \u79ef\u5206\u5df2\u9000\u56de{reason}"
+                )
+                warn = f"\u26a0\ufe0f \u8ba2\u5355 {record_no} \u5df2\u88ab\u9a73\u56de\uff0c\u4f46\u901a\u77e5\u5151\u6362\u8005\u5931\u8d25\uff08\u53ef\u80fd\u5df2\u4e0d\u5728\u672c\u7fa4\uff09\uff0c\u8bf7\u7ebf\u4e0b\u8054\u7cfb"
+            target_qq = record["qq"]
+            try:
+                await event.send(
+                    MessageChain().at(target_qq, target_qq).message(notify)
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Notify redeemer {target_qq} for {record_no} failed: {e}"
+                )
+                try:
+                    await event.send(MessageChain().message(warn))
+                except Exception as we:
+                    logger.warning(f"Send warning for {record_no} failed: {we}")
+
+            # 驳回退分回正 / 改回通过扣负：联动负分头衔
+            await self._plugin.point_service.ensure_negative_title(
+                target_qq,
+                record["group_id"],
+                bot=getattr(event, "bot", None),
             )
         except Exception as e:
-            logger.error(f"Toggle verify error: {e}")
+            logger.error(f"Verify record error: {e}")
             yield event.plain_result(
                 "\u64cd\u4f5c\u5931\u8d25\uff0c\u5df2\u8bb0\u5f55\u9519\u8bef"
             )

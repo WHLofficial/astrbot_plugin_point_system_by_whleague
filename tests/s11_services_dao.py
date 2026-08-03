@@ -453,6 +453,48 @@ async def test_dao_redeem_record_queries():
     return "DAO：兑换记录按用户/状态/群过滤与分页"
 
 
+async def test_dao_redeem_status_machine():
+    async with TempDB() as t:
+        await t.dao.add_item("商品", 10, 5)
+        await t.db.execute(
+            "INSERT INTO redeem_records (record_no, qq, group_id, item_id, item_name, item_cost, quantity) "
+            "VALUES ('R20260101-0001','u1','G1',1,'商品',10,1)"
+        )
+        # 通过：写 verified 审计
+        assert (
+            await t.dao.set_redeem_status("R20260101-0001", "verified", "admin")
+            == "verified"
+        )
+        rec = await t.dao.get_redeem_record("R20260101-0001")
+        assert rec["status"] == "verified"
+        assert rec["verified_by"] == "admin" and rec["verified_at"]
+        assert rec["rejected_by"] is None and rec["rejected_at"] is None
+        # 驳回：清空 verified 审计、写 rejected 审计
+        assert (
+            await t.dao.set_redeem_status("R20260101-0001", "rejected", "admin2", "无货")
+            == "rejected"
+        )
+        rec = await t.dao.get_redeem_record("R20260101-0001")
+        assert rec["status"] == "rejected"
+        assert rec["rejected_by"] == "admin2" and rec["rejected_at"]
+        assert rec["verified_by"] is None and rec["verified_at"] is None
+        assert rec["admin_note"] == "无货"
+        # 不存在 → None
+        assert (
+            await t.dao.set_redeem_status("R99999999-0001", "rejected", "admin")
+            is None
+        )
+        # 恢复库存：有限库存增加，无限库存（-1）不变
+        await t.dao.restore_stock(1, 2)
+        row = await t.db.fetchone("SELECT stock FROM redeem_items WHERE id=1")
+        assert row["stock"] == 7
+        await t.db.execute("UPDATE redeem_items SET stock=-1 WHERE id=1")
+        await t.dao.restore_stock(1, 3)
+        row = await t.db.fetchone("SELECT stock FROM redeem_items WHERE id=1")
+        assert row["stock"] == -1
+    return "DAO：核销/驳回状态机与审计列互斥、库存恢复"
+
+
 async def test_dao_admin_global_scope():
     async with TempDB() as t:
         await t.dao.add_admin("gadmin", "owner", "G1")
@@ -541,6 +583,7 @@ TESTS = [
     ("negative_title_id_reuse", test_negative_title_id_reuse),
     ("dao_transaction_queries", test_dao_transaction_queries),
     ("dao_redeem_record_queries", test_dao_redeem_record_queries),
+    ("dao_redeem_status_machine", test_dao_redeem_status_machine),
     ("dao_admin_global_scope", test_dao_admin_global_scope),
     ("dao_keyword_upsert", test_dao_keyword_upsert_keeps_claims),
     ("dao_misc", test_dao_misc),

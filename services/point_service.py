@@ -5,7 +5,7 @@ from ..utils.group_info import fetch_member_info
 # 不计入 total_earned（累计获得）的加分 reason：均为"扣减型"操作（消耗/扣除/负彩蛋），
 # 经 add() 传入时必须显式列在此处，否则会虚增累计获得。
 _EARNED_EXCLUDED_REASONS = frozenset(
-    {"lottery_cost", "redeem_cost", "admin_sub", "easter_unlucky"}
+    {"lottery_cost", "redeem_cost", "admin_sub", "easter_unlucky", "redeem_refund"}
 )
 
 

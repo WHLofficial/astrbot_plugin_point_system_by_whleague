@@ -262,8 +262,20 @@ async def test_redeem_handler_records():
         from astrbot_plugin_point_system_by_whleague.handlers.redeem import (
             RedeemHandler,
         )
+        from astrbot_plugin_point_system_by_whleague.services.point_service import (
+            PointService,
+        )
+        from astrbot_plugin_point_system_by_whleague.services.redeem_service import (
+            RedeemService,
+        )
 
-        handler = RedeemHandler(types.SimpleNamespace(dao=t.dao))
+        ps = PointService(t.db, t.dao)
+        plugin = types.SimpleNamespace(
+            dao=t.dao,
+            point_service=ps,
+            redeem_service=RedeemService(t.db, t.dao, ps),
+        )
+        handler = RedeemHandler(plugin)
         item_id = await t.dao.add_item("商品", 10, 5)
         await t.db.execute(
             "INSERT INTO redeem_records (record_no, qq, group_id, item_id, item_name, item_cost, quantity) "
@@ -295,21 +307,65 @@ async def test_redeem_handler_records():
         assert not any("R20260101-0002" in m for m in msgs)
         # 核销：普通成员拒绝
         msgs = await collect(
-            handler.toggle_verify(FakeEvent("u1", "G1"), "R20260101-0001", "")
+            handler.verify_record(FakeEvent("u1", "G1"), "R20260101-0001", "verified", "")
         )
         assert any("没有权限" in m for m in msgs)
-        # 核销：群管理成功 + 备注落库
+        # 核销：群管理成功 + 备注落库 + @ 通知兑换者
         await t.dao.add_admin("admin", "owner", "G1")
         ev = FakeEvent("admin", "G1", is_admin=False, msg="/核销 R20260101-0001 已发货")
-        msgs = await collect(handler.toggle_verify(ev, "R20260101-0001", "已发货"))
+        msgs = await collect(
+            handler.verify_record(ev, "R20260101-0001", "verified", "已发货")
+        )
         assert any("已核销" in m for m in msgs)
         rec = await t.dao.get_redeem_record("R20260101-0001")
         assert rec["status"] == "verified" and rec["admin_note"] == "已发货"
         assert rec["verified_by"] == "admin"
+        assert ev.sent and "R20260101-0001" in str(ev.sent[0])
+        assert "已通过核销" in str(ev.sent[0])
         # 跨群核销拒绝
-        msgs = await collect(handler.toggle_verify(ev, "R20260101-0002", ""))
-        assert any("无权核销其他群" in m for m in msgs)
-    return "兑换记录：详情/不存在/成员拒绝/群管核销+备注/跨群拒绝"
+        msgs = await collect(
+            handler.verify_record(ev, "R20260101-0002", "verified", "")
+        )
+        assert any("无权处理其他群" in m for m in msgs)
+        # 驳回：退分 + 恢复库存 + 原因入通知括号
+        msgs = await collect(
+            handler.verify_record(ev, "R20260101-0001", "rejected", "无货")
+        )
+        assert any("已驳回" in m for m in msgs)
+        rec = await t.dao.get_redeem_record("R20260101-0001")
+        assert rec["status"] == "rejected" and rec["admin_note"] == "无货"
+        assert rec["rejected_by"] == "admin"
+        assert "已被驳回" in str(ev.sent[-1]) and "（管理员驳回：无货）" in str(ev.sent[-1])
+        acct = await t.dao.get_account("u1")
+        assert acct["points"] == 10  # 退回消耗的 10 积分
+        row = await t.db.fetchone("SELECT stock FROM redeem_items WHERE id=?", (item_id,))
+        assert row["stock"] == 6  # 库存恢复
+        # 驳回 → 通过：扣回积分 + 扣库存
+        msgs = await collect(
+            handler.verify_record(ev, "R20260101-0001", "verified", "")
+        )
+        assert any("已核销" in m for m in msgs)
+        acct = await t.dao.get_account("u1")
+        assert acct["points"] == 0
+        row = await t.db.fetchone("SELECT stock FROM redeem_items WHERE id=?", (item_id,))
+        assert row["stock"] == 5
+        # 幂等：不重复处理、不通知
+        ev2 = FakeEvent("admin", "G1", is_admin=False)
+        msgs = await collect(
+            handler.verify_record(ev2, "R20260101-0001", "verified", "")
+        )
+        assert any("已是通过状态" in m for m in msgs)
+        assert ev2.sent == []
+        # 通知发送失败：发警告信息（首次 send 抛异常，警告 send 成功）
+        ev3 = FakeEvent("admin", "G1", is_admin=False)
+        ev3.send = mock.AsyncMock(side_effect=[RuntimeError("user left"), None])
+        msgs = await collect(
+            handler.verify_record(ev3, "R20260101-0001", "rejected", "")
+        )
+        assert any("已驳回" in m for m in msgs)
+        assert ev3.send.called
+        assert "通知兑换者失败" in str(ev3.send.call_args_list[-1][0][0])
+    return "兑换记录：详情/不存在/成员拒绝/群管核销+备注/驳回/通知/幂等/跨群拒绝"
 
 
 async def test_transactions_command():
@@ -525,24 +581,43 @@ async def test_main_routes():
         ev2 = _StopRecorder("u1", "G1", msg="排行")
         await collect(obj.on_ranking(ev2))
         assert ev2.stopped == 1
-        # cmd_verify：无参数 → 用法提示；有参数 → 委托 toggle_verify
+        # cmd_verify：无参数 → 用法提示；旧格式默认通过；动作词归一化委托 verify_record
         class _VerifyRecorder:
             def __init__(self):
                 self.calls = []
 
-            async def toggle_verify(self, event, record_no, note=""):
-                self.calls.append((record_no, note))
-                yield event.plain_result(f"核销 {record_no} {note}")
+            async def verify_record(self, event, record_no, action, note=""):
+                self.calls.append((record_no, action, note))
+                yield event.plain_result(f"核销 {record_no} {action} {note}")
 
         obj.redeem_handler = _VerifyRecorder()
         msgs = await collect(obj.cmd_verify(FakeEvent("u1", "G1", msg="/核销")))
         assert any("用法" in m for m in msgs)
         assert obj.redeem_handler.calls == []
+        # 旧格式：默认通过
         msgs = await collect(
             obj.cmd_verify(FakeEvent("u1", "G1", msg="/核销 R20260101-0001 已发货"))
         )
-        assert msgs == ["核销 R20260101-0001 已发货"]
-        assert obj.redeem_handler.calls == [("R20260101-0001", "已发货")]
+        assert msgs == ["核销 R20260101-0001 verified 已发货"]
+        assert obj.redeem_handler.calls == [("R20260101-0001", "verified", "已发货")]
+        # 显式通过/驳回：中英文与大小写归一
+        await collect(
+            obj.cmd_verify(FakeEvent("u1", "G1", msg="/核销 通过 R20260101-0001"))
+        )
+        assert obj.redeem_handler.calls[-1] == ("R20260101-0001", "verified", "")
+        await collect(
+            obj.cmd_verify(FakeEvent("u1", "G1", msg="/核销 REJECT R20260101-0002 无货"))
+        )
+        assert obj.redeem_handler.calls[-1] == ("R20260101-0002", "rejected", "无货")
+        await collect(
+            obj.cmd_verify(FakeEvent("u1", "G1", msg="/核销 pass R20260101-0003"))
+        )
+        assert obj.redeem_handler.calls[-1] == ("R20260101-0003", "verified", "")
+        # 动作词后缺编号：用法提示
+        msgs = await collect(obj.cmd_verify(FakeEvent("u1", "G1", msg="/核销 驳回")))
+        assert any("用法" in m for m in msgs)
+        msgs = await collect(obj.cmd_verify(FakeEvent("u1", "G1", msg="/核销 通过")))
+        assert any("用法" in m for m in msgs)
         # on_group_message 委托 active_reward_handler
         class _ActiveRecorder:
             def __init__(self):

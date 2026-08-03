@@ -118,9 +118,13 @@ async def test_schema_v1_to_v3_migration():
             "SELECT 1 FROM users WHERE qq='u1' AND group_id='G1'"
         )
         assert user is not None
+        # v4：redeem_records 驳回审计列
+        cols = await db.fetchall("PRAGMA table_info(redeem_records)")
+        names = {c["name"] for c in cols}
+        assert "rejected_at" in names and "rejected_by" in names
     finally:
         await db.close()
-    return "schema 迁移：v1→v3 加列/accounts 回填/users 瘦身/去重索引/数据保留"
+    return "schema 迁移：v1→v4 加列/accounts 回填/users 瘦身/去重索引/数据保留"
 
 
 async def test_schema_migration_idempotent():

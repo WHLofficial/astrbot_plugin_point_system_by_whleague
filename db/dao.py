@@ -273,22 +273,45 @@ class PointDAO:
         params.extend([limit, offset])
         return await self._db.fetchall(sql, params)
 
-    async def toggle_redeem_status(self, record_no: str, admin_qq: str, note: str = ""):
+    async def set_redeem_status(
+        self, record_no: str, new_status: str, admin_qq: str, note: str = ""
+    ):
+        """设置兑换记录状态（verified/rejected），审计列互斥写入。
+
+        Args:
+            record_no: 记录编号。
+            new_status: 目标状态，仅 verified / rejected。
+            admin_qq: 操作管理员 QQ。
+            note: 备注（覆盖原备注）。
+
+        Returns:
+            新状态字符串；记录不存在返回 None。
+        """
         record = await self.get_redeem_record(record_no)
         if not record:
             return None
         now = self._now_str()
-        if record["status"] == "pending":
+        if new_status == "rejected":
             await self._db.execute(
-                "UPDATE redeem_records SET status='verified', verified_at=?, verified_by=?, admin_note=? WHERE record_no=?",
+                "UPDATE redeem_records SET status='rejected', rejected_at=?, rejected_by=?, "
+                "verified_at=NULL, verified_by=NULL, admin_note=? WHERE record_no=?",
                 (now, admin_qq, note, record_no),
             )
-            return "verified"
+            return "rejected"
         await self._db.execute(
-            "UPDATE redeem_records SET status='pending', verified_at=NULL, verified_by=NULL, admin_note=? WHERE record_no=?",
-            (note, record_no),
+            "UPDATE redeem_records SET status='verified', verified_at=?, verified_by=?, "
+            "rejected_at=NULL, rejected_by=NULL, admin_note=? WHERE record_no=?",
+            (now, admin_qq, note, record_no),
         )
-        return "pending"
+        return "verified"
+
+    async def restore_stock(self, item_id: int, quantity: int):
+        """驳回时恢复物品库存；无限库存（-1）保持不变。"""
+        await self._db.execute(
+            "UPDATE redeem_items SET stock=CASE WHEN stock=-1 THEN -1 ELSE stock+? END "
+            "WHERE id=?",
+            (quantity, item_id),
+        )
 
     # ─── admins ───────────────────────────────────────────
 

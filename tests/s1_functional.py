@@ -282,12 +282,51 @@ async def test_redeem_stock_discount_verify():
         # 折扣价 >= 原价被拒
         r = await svc.set_discount(item_id, 100, end)
         assert not r["success"]
-        # 核销切换
-        new_status = await t.dao.toggle_redeem_status(rec["record_no"], "admin")
-        assert new_status == "verified"
-        new_status = await t.dao.toggle_redeem_status(rec["record_no"], "admin")
-        assert new_status == "pending"
-    return "兑换：库存/折扣时效/核销切换"
+        # 核销/驳回三态：通过（积分库存不变）→ 驳回（退分+恢复库存）→ 通过（扣分+扣库存）
+        r = await svc.set_record_status(rec["record_no"], "verified", "admin", "G1")
+        assert r["success"] and r["changed"] and r["status"] == "verified"
+        assert "已核销" in r["msg"]
+        row = await t.db.fetchone("SELECT points FROM accounts WHERE qq='u1'")
+        assert row["points"] == 300  # 通过不涉及积分变动
+        row = await t.db.fetchone("SELECT stock FROM redeem_items WHERE id=?", (item_id,))
+        assert row["stock"] == 0
+        # 驳回：退分 + 恢复库存，管理员确认消息回显备注
+        r = await svc.set_record_status(rec["record_no"], "rejected", "admin", "G1", "无货")
+        assert r["success"] and r["status"] == "rejected"
+        assert "（无货）" in r["msg"], r["msg"]
+        row = await t.db.fetchone("SELECT points FROM accounts WHERE qq='u1'")
+        assert row["points"] == 500  # 退回消耗的 200
+        row = await t.db.fetchone("SELECT stock FROM redeem_items WHERE id=?", (item_id,))
+        assert row["stock"] == 2  # 库存恢复
+        # 无效动作白名单拒绝：状态与积分不变
+        r = await svc.set_record_status(rec["record_no"], "invalid", "admin", "G1")
+        assert not r["success"] and "无效操作" in r["msg"]
+        rec2 = await t.dao.get_redeem_record(rec["record_no"])
+        assert rec2["status"] == "rejected"
+        # 退款不计入累计获得
+        acct = await t.dao.get_account("u1")
+        assert acct["total_earned"] == 0
+        # 驳回 → 通过：重新扣分 + 扣库存
+        r = await svc.set_record_status(rec["record_no"], "verified", "admin", "G1")
+        assert r["success"] and r["status"] == "verified"
+        row = await t.db.fetchone("SELECT points FROM accounts WHERE qq='u1'")
+        assert row["points"] == 300
+        row = await t.db.fetchone("SELECT stock FROM redeem_items WHERE id=?", (item_id,))
+        assert row["stock"] == 0
+        # 幂等：同态提示不重复处理
+        r = await svc.set_record_status(rec["record_no"], "verified", "admin", "G1")
+        assert r["success"] and not r["changed"]
+        # 库存不足：驳回→通过失败，积分/状态零变更
+        r = await svc.set_record_status(rec["record_no"], "rejected", "admin", "G1")
+        assert r["success"] and r["status"] == "rejected"
+        await t.db.execute("UPDATE redeem_items SET stock=0 WHERE id=?", (item_id,))
+        r = await svc.set_record_status(rec["record_no"], "verified", "admin", "G1")
+        assert not r["success"] and "库存不足" in r["msg"]
+        rec2 = await t.dao.get_redeem_record(rec["record_no"])
+        assert rec2["status"] == "rejected"
+        row = await t.db.fetchone("SELECT points FROM accounts WHERE qq='u1'")
+        assert row["points"] == 500
+    return "兑换：库存/折扣时效/核销驳回三态"
 
 
 async def test_daily_keyword():

@@ -42,7 +42,7 @@ async def test_sql_injection_fuzz():
             except Exception:
                 pass
             try:
-                await t.dao.toggle_redeem_status(payload, "admin")
+                await t.dao.set_redeem_status(payload, "rejected", "admin")
             except Exception:
                 pass
 

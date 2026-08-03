@@ -9,6 +9,8 @@ from ..config.defaults import parse_keyword_list
 
 _RANKING_KEYWORDS = ("排行", "排名", "积分榜")
 
+_MY_POINTS_KEYWORDS = ("我的积分", "积分查询")
+
 
 def _normalize_keywords(keywords) -> list:
     if isinstance(keywords, str):
@@ -57,3 +59,10 @@ def is_ranking_message(text: str) -> bool:
     if not text:
         return False
     return any(_equals(text, kw) for kw in _RANKING_KEYWORDS)
+
+
+def is_my_points_message(text: str) -> bool:
+    """我的积分触发判定：消息严格等于 我的积分/积分查询 之一。"""
+    if not text:
+        return False
+    return any(_equals(text, kw) for kw in _MY_POINTS_KEYWORDS)

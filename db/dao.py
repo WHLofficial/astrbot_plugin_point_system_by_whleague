@@ -100,6 +100,27 @@ class PointDAO:
             (min_points, n),
         )
 
+    async def get_rank_in_group(
+        self, qq: str, group_id: str, min_points: int = 1
+    ) -> int | None:
+        """返回用户在本群积分榜的排名（1 起，同分同名次）。
+
+        与排行榜口径一致：非本群成员或积分低于 min_points 时返回 None（未上榜）。
+        """
+        row = await self._db.fetchone(
+            "SELECT a.points FROM users u JOIN accounts a ON a.qq=u.qq "
+            "WHERE u.group_id=? AND u.qq=?",
+            (group_id, qq),
+        )
+        if not row or row["points"] < min_points:
+            return None
+        rank_row = await self._db.fetchone(
+            "SELECT COUNT(*)+1 AS rank FROM users u JOIN accounts a ON a.qq=u.qq "
+            "WHERE u.group_id=? AND a.points > ?",
+            (group_id, row["points"]),
+        )
+        return rank_row["rank"] if rank_row else 1
+
     async def count_users_in_group(self, group_id: str) -> int:
         row = await self._db.fetchone(
             "SELECT COUNT(*) AS cnt FROM users WHERE group_id=?", (group_id,)

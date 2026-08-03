@@ -20,6 +20,7 @@ from .db.schema import init_schema
 from .utils.helpers import set_day_boundary, today_str
 from .utils.keyword_matcher import (
     is_lottery_message,
+    is_my_points_message,
     is_ranking_message,
     is_signin_message,
 )
@@ -89,6 +90,7 @@ class PointSystemPlugin(Star):
         from .handlers.admin import AdminHandler
         from .handlers.birthday import BirthdayHandler
         from .handlers.lottery import LotteryHandler
+        from .handlers.my_points import MyPointsHandler
         from .handlers.ranking import RankingHandler
         from .handlers.redeem import RedeemHandler
         from .handlers.sign_in import SignInHandler
@@ -100,6 +102,7 @@ class PointSystemPlugin(Star):
         self.admin_handler = AdminHandler(self)
         self.birthday_handler = BirthdayHandler(self)
         self.active_reward_handler = ActiveRewardHandler(self)
+        self.my_points_handler = MyPointsHandler(self)
 
         from .handlers.command_map import CommandMapHandler
 
@@ -330,6 +333,24 @@ class PointSystemPlugin(Star):
             return
         produced = False
         async for result in self.ranking_handler.handle(event):
+            produced = True
+            yield result
+        if produced:
+            event.stop_event()
+
+    # ═══════════════════════════════════════════════════════════
+    # Handlers: My Points
+    # ═══════════════════════════════════════════════════════════
+
+    @filter.regex(r"\u6211\u7684\u79ef\u5206|\u79ef\u5206\u67e5\u8be2")
+    async def on_my_points(
+        self, event: AstrMessageEvent
+    ) -> AsyncGenerator[MessageEventResult, None]:
+        # 严格匹配触发：消息必须完全等于 我的积分/积分查询
+        if not is_my_points_message(event.get_message_str()):
+            return
+        produced = False
+        async for result in self.my_points_handler.handle(event):
             produced = True
             yield result
         if produced:

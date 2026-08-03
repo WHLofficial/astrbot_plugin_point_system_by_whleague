@@ -3,7 +3,7 @@
 import types
 from unittest import mock
 
-from .common import FakeContext, FakeEvent, TempDB, base_cfg, collect
+from .common import FakeBot, FakeContext, FakeEvent, TempDB, base_cfg, collect
 
 
 async def _signin_svc(t, cfg=None):
@@ -597,6 +597,109 @@ async def test_main_routes():
     return "main 路由：wake 跳过/兑换参数路由/兑换记录页码/cron 注册与重建/stop_event/核销委托/群消息委托/备份回调/terminate"
 
 
+async def test_my_points_handler():
+    async with TempDB() as t:
+        from astrbot_plugin_point_system_by_whleague.handlers.my_points import (
+            MyPointsHandler,
+        )
+        from astrbot_plugin_point_system_by_whleague.utils.helpers import today_str
+
+        handler = MyPointsHandler(types.SimpleNamespace(dao=t.dao))
+        # 非群聊
+        msgs = await collect(handler.handle(FakeEvent("u1", None)))
+        assert any("仅支持群聊" in m for m in msgs)
+        # 未注册
+        msgs = await collect(handler.handle(FakeEvent("u1", "G1")))
+        assert any("还没有积分记录" in m for m in msgs)
+        # 已注册：完整信息 + 群昵称 + 排名（fetch_member_info 要求数字 ID）
+        today = today_str()
+        await t.db.execute(
+            "INSERT INTO accounts (qq, points, total_sign_days, consecutive_days, last_sign_date) VALUES (?,?,?,?,?)",
+            ("10001", 50, 45, 3, today),
+        )
+        await t.db.execute("INSERT INTO users (qq, group_id) VALUES ('10001','123')")
+        await t.db.execute("INSERT INTO accounts (qq, points) VALUES ('10002',100)")
+        await t.db.execute("INSERT INTO users (qq, group_id) VALUES ('10002','123')")
+        await t.db.execute("INSERT INTO accounts (qq, points) VALUES ('10003',10)")
+        await t.db.execute("INSERT INTO users (qq, group_id) VALUES ('10003','123')")
+        ev = FakeEvent("10001", "123", bot=FakeBot(member_card="小明"))
+        msgs = await collect(handler.handle(ev))
+        text = "\n".join(msgs)
+        assert "💰 小明 (10001)" in text
+        assert "当前积分: 50" in text
+        assert "累计签到: 45 天" in text
+        assert "连签: 第 3 天" in text
+        assert "✅ 已签到" in text
+        assert "本群排名: 第 2 名" in text
+        # 最近流水：仅本群、恰 5 条、格式与 /流水 一致
+        for i in range(7):
+            await t.db.execute(
+                "INSERT INTO point_transactions (qq, group_id, amount, balance_after, reason) VALUES (?,?,?,?,?)",
+                ("10001", "123", 10 * (i + 1), 0, "签到"),
+            )
+        await t.db.execute(
+            "INSERT INTO point_transactions (qq, group_id, amount, balance_after, reason) VALUES ('10001','999',99,99,'抽奖')"
+        )
+        rows = await t.db.fetchall(
+            "SELECT id FROM point_transactions WHERE qq='10001' ORDER BY id"
+        )
+        for idx, row in enumerate(rows):
+            await t.db.execute(
+                "UPDATE point_transactions SET created_at=? WHERE id=?",
+                (f"2026-08-01 08:{idx:02d}:00", row["id"]),
+            )
+        msgs = await collect(handler.handle(ev))
+        text = "\n".join(msgs)
+        assert "📊 最近流水" in text
+        assert "🟢 +70  签到  2026-08-01 08:06" in text
+        assert "🟢 +30  签到  2026-08-01 08:02" in text
+        assert "🟢 +10" not in text  # 最早 3 条被截断
+        assert "🟢 +99" not in text  # 跨群流水不显示
+        assert "📊 最近流水" in text and len(text.split("📊 最近流水")[1].strip().splitlines()) == 5
+        # 未签到 + 0 分未上榜：无排名行
+        await t.db.execute(
+            "INSERT INTO accounts (qq, points, total_sign_days, consecutive_days, last_sign_date) VALUES ('10004',0,0,0,NULL)"
+        )
+        await t.db.execute("INSERT INTO users (qq, group_id) VALUES ('10004','123')")
+        msgs = await collect(handler.handle(FakeEvent("10004", "123")))
+        text = "\n".join(msgs)
+        assert "❌ 未签到" in text
+        assert "本群排名" not in text
+        assert "最近流水" not in text  # 无流水时不显示区块
+        # 无 bot：昵称回退纯 QQ
+        msgs = await collect(handler.handle(FakeEvent("10001", "123")))
+        text = "\n".join(msgs)
+        assert "💰 10001" in text and "10001 (10001)" not in text
+    return "我的积分 handler：完整信息/群昵称/排名/最近流水/未注册/非群/未上榜/昵称回退"
+
+
+async def test_my_points_route():
+    from astrbot_plugin_point_system_by_whleague.main import PointSystemPlugin
+
+    class _MyPointsHandler:
+        def __init__(self):
+            self.calls = 0
+
+        async def handle(self, event):
+            self.calls += 1
+            yield event.plain_result("我的积分")
+
+    obj = PointSystemPlugin.__new__(PointSystemPlugin)
+    obj.config_cache = base_cfg()
+    obj.my_points_handler = _MyPointsHandler()
+    # 非触发消息：跳过
+    msgs = await collect(
+        obj.on_my_points(FakeEvent("u1", "G1", msg="查我的积分", at_wake=True))
+    )
+    assert msgs == [] and obj.my_points_handler.calls == 0
+    # 严格触发：委托 handler
+    msgs = await collect(obj.on_my_points(FakeEvent("u1", "G1", msg="我的积分")))
+    assert msgs == ["我的积分"] and obj.my_points_handler.calls == 1
+    msgs = await collect(obj.on_my_points(FakeEvent("u1", "G1", msg="积分查询")))
+    assert msgs == ["我的积分"] and obj.my_points_handler.calls == 2
+    return "我的积分路由：严格匹配触发与委托"
+
+
 TESTS = [
     ("signin_handler", test_signin_handler_basic),
     ("lottery_handler", test_lottery_handler_paths),
@@ -606,4 +709,6 @@ TESTS = [
     ("redeem_records", test_redeem_handler_records),
     ("transactions_cmd", test_transactions_command),
     ("main_routes", test_main_routes),
+    ("my_points_handler", test_my_points_handler),
+    ("my_points_route", test_my_points_route),
 ]

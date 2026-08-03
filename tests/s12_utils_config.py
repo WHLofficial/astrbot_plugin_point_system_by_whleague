@@ -235,6 +235,7 @@ async def test_keyword_matcher_strict():
     """v0.2.1 严格匹配：仅纯触发词形态触发，附加文本/标点/大小写边界。"""
     from astrbot_plugin_point_system_by_whleague.utils.keyword_matcher import (
         is_lottery_message,
+        is_my_points_message,
         is_ranking_message,
         is_signin_message,
     )
@@ -267,7 +268,13 @@ async def test_keyword_matcher_strict():
     assert is_ranking_message(" 排行 ")
     for bad in ("排行榜", "我要排行", "积分榜！"):
         assert not is_ranking_message(bad), bad
-    return "关键词严格匹配：三功能边界/大小写/空白/附加文本全部正确"
+    # 我的积分
+    assert is_my_points_message("我的积分")
+    assert is_my_points_message("积分查询")
+    assert is_my_points_message(" 我的积分 ")
+    for bad in ("查我的积分", "我的积分！", "积分查询一下", "查积分", "积分", "my points"):
+        assert not is_my_points_message(bad), bad
+    return "关键词严格匹配：四功能边界/大小写/空白/附加文本全部正确"
 
 
 TESTS = [

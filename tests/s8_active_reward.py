@@ -66,6 +66,19 @@ async def test_ar_signin_lottery_message_skipped():
     return "活跃奖励：签到/抽奖关键词消息跳过"
 
 
+async def test_ar_my_points_message_skipped():
+    async with TempDB() as t:
+        handler, ps = await _handler_plugin(t, _cfg())
+        ev = FakeEvent("u1", "G1", msg="我的积分")
+        await handler.handle(ev)
+        assert await t.dao.get_user("u1", "G1") is None
+        assert ev.sent == []
+        ev2 = FakeEvent("u1", "G1", msg="积分查询")
+        await handler.handle(ev2)
+        assert await t.dao.get_user("u1", "G1") is None
+    return "活跃奖励：我的积分/积分查询消息跳过"
+
+
 async def test_ar_min_length_skip():
     async with TempDB() as t:
         handler, ps = await _handler_plugin(t, _cfg())
@@ -193,6 +206,7 @@ async def test_ar_daily_keyword_combined():
 TESTS = [
     ("ar_command_skipped", test_ar_command_message_skipped),
     ("ar_signin_lottery_skipped", test_ar_signin_lottery_message_skipped),
+    ("ar_my_points_skipped", test_ar_my_points_message_skipped),
     ("ar_min_length_skip", test_ar_min_length_skip),
     ("ar_user_cooldown", test_ar_user_cooldown),
     ("ar_group_cooldown", test_ar_group_cooldown),

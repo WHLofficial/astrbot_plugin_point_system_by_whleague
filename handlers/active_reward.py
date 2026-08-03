@@ -3,7 +3,11 @@ import random
 from astrbot.api import logger
 from astrbot.api.event import MessageChain
 
-from ..utils.keyword_matcher import is_lottery_message, is_signin_message
+from ..utils.keyword_matcher import (
+    is_lottery_message,
+    is_my_points_message,
+    is_signin_message,
+)
 from ..utils.security import clean_display_name
 
 
@@ -27,6 +31,9 @@ class ActiveRewardHandler:
 
             sign_kw = cfg.get("keyword_sign", [])
             if is_signin_message(msg, sign_kw):
+                return
+
+            if is_my_points_message(msg):
                 return
 
             passphrase = cfg.get("lottery_passphrase", "")

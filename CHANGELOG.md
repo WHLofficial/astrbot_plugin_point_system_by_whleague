@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.4.0 (2026-08-03)
+
+### 新增
+
+- **打劫玩法**（无前缀「打劫 @目标」触发，仅群聊）：@ 目标解析（排除 @全体成员与 bot 自身，多 @/@bot/@all/打劫自己均有明确提示），其余文本压缩空白后严格匹配 `keyword_rob`（默认「打劫」）；打劫者积分 ≥ `rob_min_points`(100) 且非负分、目标积分 ≥ `rob_target_min_points`(50) 且非负分才可发起
+- **收益公式**：`stolen = min(rob_reward_cap(200), rob_reward_fixed(50) + round(rob_reward_fixed × (目标积分/rob_reward_base_points(2000))^rob_reward_power(1.2)))`——目标 2000 分时抢 100，高分段凸曲线增长、200 分封顶；成功纯收益不扣成本，失败扣 `rob_cost`(50) 且不退还
+- **防刷**：同用户冷却 `rob_cooldown`(600s，成功/失败均进入，冷却拦截显示实时剩余分钟，成功/失败反馈显示静态冷却行)；每日上限 `rob_daily_limit`(3 次，按 QQ 全局统计，0=不限，与抽奖口径一致)
+- **负分联动**：打劫后对打劫者与目标均执行 `ensure_negative_title`（失败扣成本可能致负、目标可能被抢成负），联动「群女仆X号」头衔
+- **数据**：新增 `rob_records` 打劫记录表（schema v4 → v5，纯新增表幂等建表，无需 ALTER）；流水新增 reason `rob_cost`（仅失败，不计累计获得）/ `rob_reward` / `rob_lost`（目标扣分，不计累计获得）
+- **配置**：新增 12 项（`rob_enabled` / `rob_cost` / `rob_success_rate` / `rob_reward_fixed` / `rob_reward_base_points` / `rob_reward_power` / `rob_reward_cap` / `rob_min_points` / `rob_target_min_points` / `rob_cooldown` / `rob_daily_limit` / `keyword_rob`）；`rob_success_rate` 走 0~1 概率校验，`rob_reward_power` 单独 0~2 幂指数校验；`keyword_rob` 加入非空关键词校验（`_KEYWORD_KEYS`）
+- **互斥闭环**：口令保留字集合加入 `keyword_rob`（防止口令=「打劫」双收益刷分）；活跃奖励扫描跳过打劫形态消息；指令图新增打劫条目（`{rob_kw}` 占位动态跟随配置）
+- `utils/rate_limiter` 新增 `get_remaining`（冷却剩余秒数，cooldown≤0 或未冷却返回 0）；`utils/keyword_matcher` 新增 `parse_rob_message` / `is_rob_message`（组件属性 duck-typing 解析）
+
+### 修复
+
+- 打劫零收益极端配置（`rob_reward_cap`/`rob_reward_fixed` 为 0）下 `stolen=0` 触发 `change_balance(amount=0)` 报错：收益为 0 时跳过改分仅写记录，流程正常完成
+- 门槛检查后目标被并发扣成负分时事务内幂运算崩溃：目标余额取 `max(0, ...)` 防御，按 0 计算收益
+
+### 测试
+
+- 新增打劫系统套件（s19，19 项）：收益公式锚点/round/封顶、失败扣成本不退还与记录、门槛矩阵（开关/群聊/自己/打劫者与目标门槛）、每日限次按 QQ 全局、成功/失败均进冷却、目标被抢成负分头衔联动（FakeBot 断言 set_group_card）、守卫失败整事务回滚、零收益与并发负值防御、匹配器形态判定、handler @ 解析（无/多/@bot/@all/自己/含字）、成功/失败反馈文案（含冷却行、无收益明细、昵称清洗）、活跃奖励跳过、口令保留字、指令图条目、事务回调 conn 方法不触发死锁保护
+- 新增 `rate_limiter.get_remaining` 测试（s13）；迁移测试扩展 v1→v5 全链路（rob_records 表与索引存在，s15）
+- 测试设施：`tests/stubs.py` 新增 `astrbot.api.message_components` 桩（Plain/At/AtAll，属性对齐真实组件）；`FakeEvent` 新增 `get_messages()` / `get_self_id()`（At/AtAll/@bot 组件链构造）
+- 全量 **184/184** 通过
+
 ## v0.3.2 (2026-08-03)
 
 ### 新增

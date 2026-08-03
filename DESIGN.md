@@ -1,7 +1,7 @@
 # 积分系统插件 — 完整设计文档
 
-> 版本: v1.1  
-> 更新时间: 2026-08-02
+> 版本: v1.2  
+> 更新时间: 2026-08-03
 
 ---
 
@@ -44,14 +44,16 @@
 | 17 | **兑换折扣** | 管理员可为兑换物品设置限时折扣价 |
 | 18 | **反馈增强（v0.2.2）** | 签到反馈含当日排名/连签/当前积分；抽奖反馈含消耗/积分变化/当前积分；兑换反馈含订单号/剩余库存/积分余额/核销提示；`/查生日` 显示群昵称 |
 | 19 | **我的积分（v0.3.0）** | 无前缀关键词「我的积分 / 积分查询」，展示群昵称+QQ / 当前积分 / 累计签到 / 连签 / 今日签到 / 本群排名 / 最近 5 条本群流水 |
+| 20 | **打劫（v0.4.0）** | 无前缀「打劫 @目标」（At 段解析，排除 AtAll 与 bot 自身），成功抢得目标部分积分（凸曲线收益公式），失败扣成本；同用户冷却 + 每日上限防刷；目标可被抢成负分并联动负分头衔 |
 
 ---
 
 ## 2. 数据表设计
 
-> 当前 schema **v4**（v1 → v2：负分头衔原名片 `negative_title_prev_card`、流水操作人 `admin_qq`；
+> 当前 schema **v5**（v1 → v2：负分头衔原名片 `negative_title_prev_card`、流水操作人 `admin_qq`；
 > v2 → v3：积分一号跨群共享，accounts 按 QQ 全局唯一，users 瘦身为群级数据；
-> v3 → v4：redeem_records 新增驳回审计列 `rejected_at` / `rejected_by`）。
+> v3 → v4：redeem_records 新增驳回审计列 `rejected_at` / `rejected_by`；
+> v4 → v5：新增 rob_records 打劫记录表）。
 > 旧库首次加载自动迁移（`db/schema._migrate`），升级前建议先备份数据库。
 
 ### 2.1 accounts — 全局账户表（v0.2.0 新增，一号跨群共享）
@@ -182,6 +184,9 @@ CREATE INDEX IF NOT EXISTS idx_pt_reason ON point_transactions(reason);
 | `daily_keyword` | 每日口令奖励 |
 | `admin_add` | 管理员加分 |
 | `admin_sub` | 管理员扣分 |
+| `rob_cost` | 打劫成本（仅失败记录，不计入累计获得） |
+| `rob_reward` | 打劫成功收益 |
+| `rob_lost` | 被打劫损失（目标扣分，不计入累计获得） |
 
 ### 2.6 redeem_items — 兑换物品表
 
@@ -329,6 +334,25 @@ CREATE TABLE IF NOT EXISTS plugin_config (
 );
 ```
 
+### 2.15 rob_records — 打劫记录表（v0.4.0 新增，schema v5）
+
+```sql
+CREATE TABLE IF NOT EXISTS rob_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    qq TEXT NOT NULL,
+    target_qq TEXT NOT NULL,
+    group_id TEXT NOT NULL,
+    cost INTEGER NOT NULL,               -- 配置成本（审计）
+    stolen INTEGER NOT NULL DEFAULT 0,   -- 实际得失（成功=收益，失败=0）
+    success INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_rob_qq_date ON rob_records(qq, created_at);   -- 每日限次
+CREATE INDEX IF NOT EXISTS idx_rob_target ON rob_records(target_qq);
+```
+
+> 纯新增表：`init_schema` 幂等建表，无需 ALTER 迁移逻辑，仅 `SCHEMA_VERSION` bump 到 5。
+
 ---
 
 ## 3. 配置项表
@@ -367,6 +391,19 @@ CREATE TABLE IF NOT EXISTS plugin_config (
 | lottery_daily_limit | int | 10 | 每日抽奖次数上限（按 QQ 全局统计） |
 | lottery_passphrase | str | "whl" | 抽奖口令 |
 | lottery_tiers | json | (见下) | 五档配置 |
+| **打劫（v0.4.0）** | | | |
+| rob_enabled | bool | true | 总开关 |
+| rob_cost | int | 50 | 打劫成本（仅失败时扣除，成功纯收益） |
+| rob_success_rate | float | 0.35 | 成功率 (0~1) |
+| rob_reward_fixed | int | 50 | 成功固定收益（= 成本） |
+| rob_reward_base_points | int | 2000 | 收益锚点目标积分（目标积分为此值时动态收益 = 固定收益） |
+| rob_reward_power | float | 1.2 | 收益幂指数（>1 凸曲线，0~2 合法） |
+| rob_reward_cap | int | 200 | 单次收益总上限 |
+| rob_min_points | int | 100 | 打劫者积分门槛 |
+| rob_target_min_points | int | 50 | 目标积分门槛 |
+| rob_cooldown | int | 600 | 同用户打劫冷却秒数（0=不限，成功/失败均进入） |
+| rob_daily_limit | int | 3 | 每日打劫次数上限（按 QQ 全局统计，0=不限） |
+| keyword_rob | json | ["打劫"] | 打劫触发关键词（注意：修改后需同步 main.py 的 on_rob 粗筛正则） |
 | **负分** | | | |
 | negative_disable_lottery | bool | true | 负分禁止抽奖 |
 | **生日** | | | |
@@ -380,6 +417,7 @@ CREATE TABLE IF NOT EXISTS plugin_config (
 | **关键词** | | | |
 | keyword_sign | json | ["签到","sign","打卡"] | 签到触发关键词列表 |
 | keyword_lottery | json | ["抽奖","lottery"] | 抽奖触发关键词列表 |
+| keyword_rob | json | ["打劫"] | 打劫触发关键词列表 |
 | **指令图** | | | |
 | cmd_map_user_cooldown | int | 30 | 同用户指令图生成冷却（秒，0=不限） |
 | cmd_map_group_cooldown | int | 10 | 同群指令图生成冷却（秒，0=不限） |
@@ -421,6 +459,7 @@ astrbot_plugin_point_system_by_whleague/
 │   ├── __init__.py
 │   ├── sign_in.py                # 签到：参数解析 + 回复格式化
 │   ├── lottery.py                # 抽奖：口令验证 + 金额固定 + 回复格式化
+│   ├── rob.py                    # 打劫：@ 目标解析 + 反馈格式化（v0.4.0）
 │   ├── redeem.py                 # 兑换：物品增删改查 + 兑换 + 核销 + 记录查询
 │   ├── ranking.py                # 排行：群 → 全局回退
 │   ├── admin.py                  # 管理指令：加/减分、管理物品、设置口令/配置
@@ -431,6 +470,7 @@ astrbot_plugin_point_system_by_whleague/
 │   ├── point_service.py          # 核心积分操作（加/减/查/负分联动/自动记流水）
 │   ├── sign_in_service.py        # 签到积分计算（协调彩蛋/生日/日期口令/连签/周签）
 │   ├── lottery_service.py        # 五档权重随机抽奖
+│   ├── rob_service.py            # 打劫：门槛/冷却/限次/收益公式/记录（v0.4.0）
 │   ├── easter_service.py         # 彩蛋概率引擎 + 独立保底计数器
 │   ├── redeem_service.py         # 库存原子递减 + 编号生成
 │   ├── ranking_service.py        # 排行查询 + 签到统计
@@ -460,6 +500,7 @@ astrbot_plugin_point_system_by_whleague/
     │
     ├─ @filter.regex(签到关键词) ───────────── main.py 委托 →
     ├─ @filter.regex(抽奖关键词) ───────────── main.py 委托 →
+    ├─ @filter.regex(打劫关键词) ───────────── main.py 委托 →（handler 内 At 解析 + 严格匹配）
     ├─ @filter.regex(排行关键词) ───────────── main.py 委托 →
     ├─ @filter.command(兑换/设置生日/加分...) ─── main.py 委托 →
     ├─ @filter.event_message_type(GROUP) ───── main.py 委托 →
@@ -518,6 +559,7 @@ class PointPlugin(Star):
 |---|---|---|
 | 签到 | `@filter.regex("签到\|sign\|打卡")` | 无前缀触发 |
 | 抽奖 | `@filter.regex("抽奖\|lottery")` | 无前缀触发（handler 内验口令） |
+| 打劫 | `@filter.regex("打劫")` | 无前缀触发（handler 内 At 解析 + 严格匹配 keyword_rob） |
 | 排行 | `@filter.regex("排行\|排名\|积分榜")` | 无前缀触发 |
 | 兑换系列 | `@filter.command("兑换")` | 需命令前缀 |
 | 加分 | `@filter.command("加分")` + `@filter.permission_type(ADMIN)` | 需前缀 + 管理员 |
@@ -542,8 +584,10 @@ class PointPlugin(Star):
 消息进入 → 按优先级判定：
   1. 签到关键词命中 → sign_in 处理 → stop_event（阻止后续）
   2. 否 → 抽奖关键词+口令同时命中 → lottery 处理（但额外检查是否含签到关键词，含则跳过）
-  3. 否 → active_reward（额外跳过含签到关键词 或 同时含抽奖关键词+口令的消息）
+  3. 否 → 打劫形态（有效 @ + 关键词严格匹配）→ rob 处理 → stop_event；active_reward 同步跳过打劫形态（防双收益刷分）
+  4. 否 → active_reward（额外跳过含签到关键词 或 同时含抽奖关键词+口令的消息）
 ```
+> 口令保留字（v0.4.0 起含 `keyword_rob`）：`/设置今日口令` 关键词与签到/抽奖/打劫/排行触发词相同或构成「口令±触发词」组合时拒绝设置，杜绝口令死锁。
 
 ---
 
@@ -905,6 +949,43 @@ async def change_balance(conn, qq, group_id, amount, reason, *,
 > `conn` 由调用方事务传入（与 `generate_record_no(conn)` 同一模式，不触碰 db.lock 重入）；
 > 由此消灭 5 处重复的"UPDATE points + SELECT + INSERT 流水" SQL 模式。
 
+### 7.15 打劫业务逻辑（v0.4.0）
+
+```
+rob(qq, target_qq, group_id, bot=None):
+  # 1. rob_enabled 开关；qq == target_qq 拒绝；target 为 bot 自身由 handler 拒绝
+  # 2. 打劫者门槛：balance >= rob_min_points 且非负分
+  # 3. 目标门槛：target_balance >= rob_target_min_points 且非负分
+  # 4. 用户冷却（rate_limiter，key="rob"）→ 拦截时返回剩余秒数供提示
+  # 5. execute_transaction(_tx)：
+  #    a. 每日次数：COUNT rob_records WHERE qq AND created_at >= period_start_str()
+  #       （按 QQ 全局统计，与抽奖口径一致）
+  #    b. SELECT 目标余额（事务内，max(负,0) 防御并发扣负；与扣分同源防偏差）
+  #    c. success = random() < rob_success_rate
+  #    d. 成功分支：stolen = min(cap, fixed + round(fixed * (target/base) ** power))
+  #       → change_balance(+stolen, "rob_reward")；目标 change_balance(-stolen, "rob_lost",
+  #       earned_amount=0)（允许扣负；stolen=0 极端配置时跳过 change_balance 防 amount=0 报错）
+  #       失败分支：change_balance(-cost, "rob_cost", earned_amount=0, guard_balance=cost)
+  #       （守卫失败抛 RobError 整事务回滚）
+  #    e. INSERT rob_records（cost=配置成本, stolen, success）
+  # 6. ensure_negative_title(qq) 与 ensure_negative_title(target_qq)（负分头衔联动）
+  # 7. 返回 success/stolen/balance/target_balance 等字段供 handler 格式化
+```
+
+收益公式锚点：目标 = base(2000) 时 dynamic = fixed(50) → stolen = 100；cap(200) 触顶。
+失败分支与成本扣除同一事务内完成，保证原子（无记录残留/无半扣款）。
+
+### 7.15b 打劫触发形态（v0.4.0）
+
+- 消息组件解析（`event.get_messages()`，组件属性 duck-typing，不依赖 isinstance）：
+  - `At` 段（排除 AtAll `qq=="all"` 与 `qq==self_qq`）→ 有效目标，取第一个；多个 → 提示"一次只能打劫一个目标"
+  - 其余 `Plain` 段拼接 → 压缩空白后严格等于某打劫关键词（顺序无关）
+  - 无有效目标：存在 @all/@bot → "不能打劫机器人/全体成员"；纯关键词无 @ → "用法: 打劫 @目标"；非打劫形态静默
+- `utils/keyword_matcher.parse_rob_message / is_rob_message`：统一解析入口（handler 与 active_reward 跳过共用）
+- 仅群聊（无 group_id 拒绝）
+- 反馈昵称：`fetch_member_info`（card → nickname → QQ 回退）+ `clean_display_name` 防注入
+- 冷却提示：成功/失败反馈用 `ceil(rob_cooldown/60)` 静态计算；冷却拦截用 `rate_limiter.get_remaining` 实时值
+
 ---
 
 ## 8. 后台定时任务
@@ -947,9 +1028,9 @@ async def change_balance(conn, qq, group_id, amount, reason, *,
 | 容错 | 每个 handler try-except → 记日志 → 回复用户友好提示，不崩溃 |
 | 数据完整 | 签到多步操作（积分+流水+日志）在一个事务内完成 |
 | 防重复 | `sign_in_log (qq, sign_date)` 全局唯一索引 + 事务内查重（全局限签 1 次） |
-| 防滥用 | 每用户每操作独立冷却 + 全群全局冷却 |
+| 防滥用 | 每用户每操作独立冷却 + 全群全局冷却；打劫另有每日上限（按 QQ 全局）+ 口令保留字防「打劫=口令」双收益 |
 | 输入校验 | 积分范围检查、QQ 号数字校验、字符串截断（最长 200 字） |
-| 昵称防注入 | 所有群昵称/发送者昵称拼装点统一 `clean_display_name` 剥离控制字符（运势/排行/查生日/活跃奖励） |
+| 昵称防注入 | 所有群昵称/发送者昵称拼装点统一 `clean_display_name` 剥离控制字符（运势/排行/查生日/活跃奖励/打劫） |
 | SQL 注入 | 所有 DAO 使用 `?` 占位符，零字符串拼接 |
 | 生命周期 | `initialize()` 建表+启动任务；`terminate()` 关闭连接+清理任务 |
 | 备份 | `VACUUM INTO` 一致快照（含 WAL 数据），目标已存在自动追加序号；目录不存在时自动创建；每目录仅保留最近 `backup_keep_count` 份 |
@@ -975,6 +1056,7 @@ async def change_balance(conn, qq, group_id, amount, reason, *,
 | `utils/helpers.py` | 40 | 工具函数 |
 | `handlers/sign_in.py` | 70 | 签到入口（参数解析 + 回复格式） |
 | `handlers/lottery.py` | 70 | 抽奖入口（口令验证 + 取金额） |
+| `handlers/rob.py` | 100 | 打劫入口（@ 解析 + 反馈格式化） |
 | `handlers/redeem.py` | 180 | 兑换物品 CRUD + 兑换 + 核销 + 记录查询 + 折扣 |
 | `handlers/ranking.py` | 50 | 排行 + 签到统计 |
 | `handlers/admin.py` | 150 | 加/减分 + 配置管理 |
@@ -983,6 +1065,7 @@ async def change_balance(conn, qq, group_id, amount, reason, *,
 | `services/point_service.py` | 100 | 积分加减 + 负分联动 + 自动记流水 |
 | `services/sign_in_service.py` | 130 | 签到积分计算（协调所有子奖励+运势） |
 | `services/lottery_service.py` | 60 | 五档权重 |
+| `services/rob_service.py` | 190 | 打劫事务（门槛/冷却/限次/收益公式/记录） |
 | `services/easter_service.py` | 60 | 彩蛋 + 独立保底 |
 | `services/redeem_service.py` | 80 | 库存 + 编号生成 + 折扣 |
 | `services/ranking_service.py` | 60 | 排行逻辑 + 签到统计 |
@@ -1002,6 +1085,7 @@ async def change_balance(conn, qq, group_id, amount, reason, *,
 | 无前缀 | `{口令}抽奖` / `抽奖{口令}` | 抽奖 | 成员 |
 | 无前缀 | `排行` / `排名` / `积分榜` | 群排行 | 成员 |
 | 无前缀 | `我的积分` / `积分查询` | 我的积分概览（群昵称+QQ/当前积分/累计签到/连签/今日签到/本群排名/最近流水） | 成员 |
+| 无前缀 | `打劫 @目标` | 打劫群友抢积分（成功抢得部分积分、失败扣成本；冷却+每日限次） | 成员 |
 | 有前缀 | `/兑换` | 查看可兑换物品 | 成员 |
 | 有前缀 | `/兑换 <物品ID> [数量]` | 兑换物品 | 成员 |
 | 有前缀 | `/兑换记录 [页码]` | 查看自己的兑换记录 | 成员 |

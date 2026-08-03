@@ -47,6 +47,10 @@ class PointSystemPlugin(Star):
 
         await init_schema(self.db)
 
+        # 清理历史遗留的非持久化 cron 任务行（旧版本禁用/热更新插件时未真正移除，
+        # 残留行虽不会被重新调度但会持续累积；幂等自愈）。
+        await self._cleanup_stale_cron_jobs()
+
         self.config_cache = await self._load_config_cache()
         set_day_boundary(self.config_cache.get("signin_refresh_time", "04:00"))
         self.rate_limiter = RateLimiter()
@@ -190,16 +194,60 @@ class PointSystemPlugin(Star):
         return raw
 
     async def _remove_cron_jobs(self) -> None:
-        """移除已注册的定时任务（配置热更新与终止时复用）。"""
+        """移除已注册的定时任务（配置热更新与终止时复用）。
+
+        add_basic_job 返回的是 CronJob 数据对象（无 remove() 方法），必须经
+        cron_manager.delete_job(job_id) 才能真正从调度器与数据库中移除，
+        否则禁用/热更新会反复累积重复任务。
+        """
+        cron_mgr = getattr(self.context, "cron_manager", None)
         for attr in ("_backup_job", "_birthday_job"):
             job = getattr(self, attr, None)
-            if job:
+            if not job:
+                continue
+            job_id = getattr(job, "job_id", None)
+            if job_id and cron_mgr and hasattr(cron_mgr, "delete_job"):
                 try:
-                    job.remove()
+                    await cron_mgr.delete_job(job_id)
+                    continue
                 except Exception:
                     pass
+            try:
+                job.remove()
+            except Exception:
+                pass
         self._backup_job = None
         self._birthday_job = None
+
+    async def _cleanup_stale_cron_jobs(self) -> None:
+        """幂等清理本插件历史遗留的非持久化 cron 任务行。
+
+        旧版本 `_remove_cron_jobs` 调用了不存在的 `job.remove()`（异常被静默
+        吞掉），禁用/热更新插件时任务从未真正移除，导致 cron_jobs 表行与调度
+        器任务反复累积。残留行 persistent=0，重启后不会被重新调度，但会在每次
+        启用时生成新行；此方法通过 cron manager 的 API 逐条删除，自愈历史数据。
+        """
+        cron_mgr = getattr(self.context, "cron_manager", None)
+        if cron_mgr is None or not hasattr(cron_mgr, "list_jobs"):
+            return
+        try:
+            jobs = await cron_mgr.list_jobs()
+        except Exception as e:
+            logger.warning(f"Failed to list cron jobs for cleanup: {e}")
+            return
+        stale = [
+            job
+            for job in jobs
+            if not getattr(job, "persistent", True)
+            and getattr(job, "job_type", None) == "basic"
+            and getattr(job, "name", None)
+            in ("points_backup", "birthday_announce")
+        ]
+        for job in stale:
+            try:
+                await cron_mgr.delete_job(job.job_id)
+            except Exception as e:
+                logger.warning(f"Failed to remove stale cron job {job.job_id}: {e}")
 
     async def reschedule_cron_jobs(self) -> None:
         """热更新定时任务：移除旧任务后按最新配置重建。"""

@@ -300,11 +300,12 @@ async def test_negative_target_points_defensive():
 
 
 async def test_matcher_rob_message():
-    from astrbot.api.message_components import At, AtAll, Plain
     from astrbot_plugin_point_system_by_whleague.utils.keyword_matcher import (
         is_rob_message,
         parse_rob_message,
     )
+
+    from astrbot.api.message_components import At, AtAll, Plain
 
     assert is_rob_message([Plain("打劫"), At(qq="123")], ["打劫"], "bot") is True
     # 顺序无关：@ 在前
@@ -329,6 +330,39 @@ async def test_matcher_rob_message():
 
 
 # ─── handler 层 ──────────────────────────────────────────
+
+
+async def test_matcher_real_enum_type():
+    """真实平台组件的 type 是 str 枚举（str(枚举成员) 是全名而非成员值），
+    解析必须用 == 直接比较；回归：v0.4.0 线上"打劫@群友没反应"。"""
+    from enum import Enum
+
+    from astrbot_plugin_point_system_by_whleague.utils.keyword_matcher import (
+        is_rob_message,
+        parse_rob_message,
+    )
+
+    class _T(str, Enum):
+        Plain = "Plain"
+        At = "At"
+
+    class _P:
+        type = _T.Plain
+        text = "打劫"
+
+    class _A:
+        type = _T.At
+        qq = "123"
+
+    assert str(_T.Plain) != "Plain"  # 枚举 str() 是 "…Plain" 全名
+    assert is_rob_message([_P(), _A()], ["打劫"], "bot") is True
+    # @bot 自身被排除
+    assert is_rob_message([_P(), _A()], ["打劫"], "123") is False
+    # 文本不匹配不触发
+    assert is_rob_message([type("_P2", (), {"type": _T.Plain, "text": "别打劫我"})(), _A()], ["打劫"], "bot") is False
+    p = parse_rob_message([_P(), _A()], ["打劫"], "bot")
+    assert p["targets"] == ["123"] and p["text_match"] is True
+    return "匹配器：真实 str 枚举组件 type 兼容（回归 bug）"
 
 
 async def test_handler_at_parsing():
@@ -501,6 +535,7 @@ TESTS = [
     ("zero_stolen_defensive", test_zero_stolen_config_defensive),
     ("negative_target_defensive", test_negative_target_points_defensive),
     ("matcher_rob", test_matcher_rob_message),
+    ("matcher_real_enum", test_matcher_real_enum_type),
     ("handler_at_parsing", test_handler_at_parsing),
     ("handler_format", test_handler_format_success_failure),
     ("handler_nickname_clean", test_handler_nickname_clean),

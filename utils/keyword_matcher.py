@@ -92,15 +92,17 @@ def parse_rob_message(components, rob_keywords, self_qq) -> dict:
     texts = []
     self_id = str(self_qq) if self_qq is not None else ""
     for c in components or []:
-        ctype = str(getattr(c, "type", "")).lower()
-        if ctype == "at":
+        # 真实组件 type 为 str 枚举（ComponentType.Plain == "Plain"，但 str() 会得到
+        # "ComponentType.Plain" 全名），必须用 == 直接比较而非 str() 转换
+        ctype = getattr(c, "type", "")
+        if ctype in ("At", "at"):
             qq_raw = getattr(c, "qq", None)
             q = str(qq_raw) if qq_raw is not None else ""
             if not q or q.lower() == "all" or q == self_id:
                 invalid_at = True
             else:
                 targets.append(q)
-        elif ctype == "plain":
+        elif ctype in ("Plain", "plain"):
             texts.append(getattr(c, "text", ""))
     norm_text = _norm("".join(texts)).lower()
     text_match = any(norm_text == _norm(k).lower() for k in keywords)

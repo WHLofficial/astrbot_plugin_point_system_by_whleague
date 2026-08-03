@@ -26,14 +26,14 @@
 | # | 功能 | 简述 |
 |---|---|---|
 | 1 | **每日签到** | 固定/随机积分，首次签到奖励、每日首签奖励、连签奖励（有上限）、每 7 天奖励，签到回复尾附每日运势 |
-| 2 | **彩蛋事件** | 签到触发欧皇/非酋事件，±大量积分，有保底计数器（欧皇优先，计数器独立） |
+| 2 | **彩蛋事件** | 签到概率触发欧皇/非酋事件，±大量积分；触发概率与保底次数为配置项（v0.3.0 起，欧皇/非酋各自独立，默认 0.005 / 200，旧数据不再强制触发） |
 | 3 | **活跃奖励** | 群成员发送合规普通消息（非空、含指令前缀、达到字数下限），概率获得积分，有用户冷却 + 全局冷却 |
 | 4 | **每日口令** | 管理员当天动态设置关键词+积分，消息含该关键词即得（每人每天限 1 次） |
 | 5 | **日期口令** | 预配置日期范围+关键词+概率，签到联动触发，支持跨年 |
 | 6 | **无前缀触发** | 不需要命令前缀，消息含配置关键词即可触发的签到/抽奖/排行 |
 | 7 | **群内排行** | 优先当前群正积分用户 Top 10，群注册用户不足 3 人时回退全局 Top 10 |
 | 8 | **个人抽奖** | 固定消耗+口令验证，五档权重概率（特等奖/一等奖/二等奖/三等奖/参与奖） |
-| 9 | **兑换玩法** | 积分换物品，库存管理（原子扣减），兑换记录+核销状态双向切换，限时折扣 |
+| 9 | **兑换玩法** | 积分换物品，库存管理（原子扣减），兑换记录核销/驳回三态（pending/verified/rejected 可互切，驳回退回积分并恢复库存），核销/驳回后群内 @ 通知兑换者，限时折扣 |
 | 10 | **管理员指令** | 独立管理员名单（bot 主人自动为管理员），@或 QQ 号增减积分，管理兑换/口令/配置 |
 | 11 | **生日系统** | 记录生日（MM-DD / MM月DD日），生日签到奖励，定时播报当日寿星 |
 | 12 | **负分联动** | 负分仅可签到恢复积分，不能抽奖/兑换/活跃奖励，自动分配/撤销"群女仆X号"头衔 |
@@ -43,13 +43,15 @@
 | 16 | **每日运势** | 签到回复尾部自动附带运势文本（同用户同天一致，纯趣味不涉及积分） |
 | 17 | **兑换折扣** | 管理员可为兑换物品设置限时折扣价 |
 | 18 | **反馈增强（v0.2.2）** | 签到反馈含当日排名/连签/当前积分；抽奖反馈含消耗/积分变化/当前积分；兑换反馈含订单号/剩余库存/积分余额/核销提示；`/查生日` 显示群昵称 |
+| 19 | **我的积分（v0.3.0）** | 无前缀关键词「我的积分 / 积分查询」，展示群昵称+QQ / 当前积分 / 累计签到 / 连签 / 今日签到 / 本群排名 / 最近 5 条本群流水 |
 
 ---
 
 ## 2. 数据表设计
 
-> 当前 schema **v3**（v1 → v2：负分头衔原名片 `negative_title_prev_card`、流水操作人 `admin_qq`；
-> v2 → v3：积分一号跨群共享，accounts 按 QQ 全局唯一，users 瘦身为群级数据）。
+> 当前 schema **v4**（v1 → v2：负分头衔原名片 `negative_title_prev_card`、流水操作人 `admin_qq`；
+> v2 → v3：积分一号跨群共享，accounts 按 QQ 全局唯一，users 瘦身为群级数据；
+> v3 → v4：redeem_records 新增驳回审计列 `rejected_at` / `rejected_by`）。
 > 旧库首次加载自动迁移（`db/schema._migrate`），升级前建议先备份数据库。
 
 ### 2.1 accounts — 全局账户表（v0.2.0 新增，一号跨群共享）
@@ -175,6 +177,7 @@ CREATE INDEX IF NOT EXISTS idx_pt_reason ON point_transactions(reason);
 | `lottery_cost` | 抽奖消耗 |
 | `lottery_reward` | 抽奖奖励 |
 | `redeem_cost` | 兑换消耗 |
+| `redeem_refund` | 兑换驳回退款（不计入累计获得） |
 | `active_reward` | 活跃奖励 |
 | `daily_keyword` | 每日口令奖励 |
 | `admin_add` | 管理员加分 |
@@ -251,6 +254,9 @@ CREATE TABLE IF NOT EXISTS date_rewards (
 ```
 
 ### 2.10 easter_events — 彩蛋事件配置表
+
+> v0.3.0 起：触发概率与保底次数改由配置项驱动（见 §6），本表 `probability` 仅作同类多事件
+> 加权选择权重，`pity_count` 列不再参与触发判定。
 
 ```sql
 CREATE TABLE IF NOT EXISTS easter_events (
@@ -342,6 +348,11 @@ CREATE TABLE IF NOT EXISTS plugin_config (
 | signin_consecutive_bonus_per_day | int | 5 | 连签每日递加值 |
 | signin_weekly_bonus | int | 100 | 每 7 天额外奖励 |
 | signin_refresh_time | str | 04:00 | 每日刷新时刻（签到/口令/抽奖次数等每日逻辑） |
+| **彩蛋（v0.3.0 起配置化）** | | | |
+| easter_lucky_probability | float | 0.005 | 欧皇触发概率 (0~1) |
+| easter_lucky_pity_count | int | 200 | 欧皇保底签到次数（0=关闭保底） |
+| easter_unlucky_probability | float | 0.005 | 非酋触发概率 (0~1) |
+| easter_unlucky_pity_count | int | 200 | 非酋保底签到次数（0=关闭保底） |
 | **活跃奖励** | | | |
 | active_reward_enabled | bool | true | 开关 |
 | active_reward_probability | float | 0.05 | 触发概率 (0~1) |
@@ -565,8 +576,10 @@ points_earned += max(0, effective - 1) * signin_consecutive_bonus_per_day
 if consecutive_days > 0 and consecutive_days % 7 == 0:
     points_earned += signin_weekly_bonus
 
-# 6. 彩蛋（欧皇/非酋，最多一个，欧皇优先，计数器独立）
-easter = easter_service.trigger(user.lucky_pity, user.unlucky_pity)
+# 6. 彩蛋（欧皇/非酋，最多一个，欧皇优先，计数器独立；概率/保底取配置项）
+easter = easter_service.trigger(user.lucky_pity, user.unlucky_pity,
+                                cfg.easter_lucky_probability, cfg.easter_unlucky_probability,
+                                cfg.easter_lucky_pity_count, cfg.easter_unlucky_pity_count)
 points_earned += easter.points
 
 # 7. 生日奖励
@@ -585,29 +598,39 @@ points_earned += date_bonus
 > v0.2.0 起签到状态（连签/累计天数/保底计数器）存于 accounts，跨群延续；
 > 积分入账走 `PointService.change_balance`（earned_amount 排除非酋负事件）。
 
-### 7.2 彩蛋保底逻辑
+### 7.2 彩蛋保底逻辑（v0.3.0 起配置驱动）
+
+触发概率与保底次数由配置项控制（欧皇/非酋各自独立，见 §6 配置表）；`easter_events` 表
+的 `probability` 列仅保留作同类多事件加权选择权重，`pity_count` 列不再参与判定。
 
 ```python
-def trigger(lucky_pity, unlucky_pity):
+def trigger(lucky_pity, unlucky_pity,
+            lucky_probability, unlucky_probability,   # 配置：欧皇/非酋概率
+            lucky_pity_count, unlucky_pity_count):    # 配置：欧皇/非酋保底（0=关闭）
     lucky_pity += 1
     unlucky_pity += 1
-    
-    max_lucky_pity = max(e.pity_count for e in active_lucky_events)
-    max_unlucky_pity = max(e.pity_count for e in active_unlucky_events)
-    
-    force_lucky = lucky_pity >= max_lucky_pity
-    force_unlucky = unlucky_pity >= max_unlucky_pity
-    
+
+    force_lucky = lucky_pity_count > 0 and lucky_pity >= lucky_pity_count
+    force_unlucky = unlucky_pity_count > 0 and unlucky_pity >= unlucky_pity_count
+
     # Lucky checked first (priority)
-    if force_lucky or (not force_unlucky and random() <= lucky_prob):
+    if force_lucky:
         lucky_pity = 0  # only lucky resets
         return pick_random(active_lucky_events)
-    elif force_unlucky or random() <= unlucky_prob:
+    elif force_unlucky:
         unlucky_pity = 0  # only unlucky resets
+        return pick_random(active_unlucky_events)
+    elif random() < lucky_probability:
+        lucky_pity = 0
+        return pick_random(active_lucky_events)
+    elif random() < unlucky_probability:
+        unlucky_pity = 0
         return pick_random(active_unlucky_events)
     else:
         return None  # no event
 ```
+
+> 默认保底 200 / 概率 0.005：旧系统迁移的高保底计数（≤90）远低于阈值，不再强制触发。
 
 ### 7.3 抽奖——五档权重
 
@@ -751,18 +774,40 @@ def get_ranking(group_id, top_n=10):
 # 全局榜每行附"最近活跃群"（users.updated_at 最大者）用于取昵称/展示
 ```
 
-### 7.9 兑换核销（双向切换）
+### 7.9 兑换核销 / 驳回（v0.3.0 三态）
+
+状态机：`pending`（待处理）→ `verified`（通过）/ `rejected`（驳回），通过 ↔ 驳回可互切；
+`/核销 [通过|pass|驳回|reject] <记录编号> [备注]`，未写动作词默认通过（旧格式兼容）。
 
 ```python
-@filter.command("核销")
-async def cmd_verify(self, event: AstrMessageEvent):
-    record_no = extract_arg(event)
+# 单事务完成：条件状态迁移（WHERE status=? 防并发重复处理）+ 积分 + 库存
+async def set_record_status(record_no, action, admin_qq, group_id, note):
     record = dao.get_redeem_record(record_no)
-    if record.status == "pending":
-        dao.update_record_status(record_no, "verified", admin_qq, note)
-    else:
-        dao.update_record_status(record_no, "pending", None, note)
+    if action not in ("verified", "rejected"):  # 白名单校验
+        return failure(f"无效操作: {action}")
+    if record.status == action:                 # 幂等
+        return success("已是通过/驳回状态", changed=False)
+
+    async with conn.execute(
+        "UPDATE redeem_records SET status=?, verified_at/rejected_at=?, ... "
+        "WHERE record_no=? AND status=?", (action, ..., record_no, record.status)
+    ) as cur:
+        if cur.rowcount == 0: raise ValueError("记录状态已变更，请刷新后重试")
+
+    if action == "rejected":                    # 通过 → 驳回
+        change_balance(+record.item_cost, reason="redeem_refund", earned_amount=0)
+        restore_stock(item_id, quantity)        # -1 无限库存不变
+    elif record.status == "rejected":           # 驳回 → 通过
+        deduct_stock(guard: stock=-1 or stock>=qty)   # 不足则失败，积分/状态零变更
+        change_balance(-record.item_cost, reason="redeem_cost", guard_balance=None)  # 允许负
+
+# 状态变更成功后：群内 @ 通知兑换者（MessageChain.at(qq).message(文案)）
+# 发送失败（如已退群）→ 发警告信息；状态结果不受通知成败影响
+# 扣负/退分回正后联动 ensure_negative_title（负分头衔）
 ```
+
+驳回通知文案：`❌ 你的兑换订单 {no}（{item} x{qty}）已被驳回，消耗的 {cost} 积分已退回（管理员驳回[:原因]）`；
+通过通知：`✅ 你的兑换订单 {no}（{item} x{qty}）已通过核销[备注]`；管理员确认消息回显备注。
 
 ### 7.10 兑换折扣
 
@@ -954,6 +999,7 @@ async def change_balance(conn, qq, group_id, amount, reason, *,
 | 无前缀 | `签到` / `sign` / `打卡` | 签到（回复含运势） | 成员 |
 | 无前缀 | `{口令}抽奖` / `抽奖{口令}` | 抽奖 | 成员 |
 | 无前缀 | `排行` / `排名` / `积分榜` | 群排行 | 成员 |
+| 无前缀 | `我的积分` / `积分查询` | 我的积分概览（群昵称+QQ/当前积分/累计签到/连签/今日签到/本群排名/最近流水） | 成员 |
 | 有前缀 | `/兑换` | 查看可兑换物品 | 成员 |
 | 有前缀 | `/兑换 <物品ID> [数量]` | 兑换物品 | 成员 |
 | 有前缀 | `/兑换记录 [页码]` | 查看自己的兑换记录 | 成员 |
@@ -971,7 +1017,7 @@ async def change_balance(conn, qq, group_id, amount, reason, *,
 | 有前缀 | `/添加兑换 <名称> <消耗> [库存]` | 新增兑换物品 | 管理员 |
 | 有前缀 | `/删除兑换 <物品ID>` | 软删除物品 | 管理员 |
 | 有前缀 | `/修改兑换 <ID> <字段> <值>` | 修改物品属性（价格/库存/折扣价/折扣时间/名称/描述，支持中文，反馈全字段） | 管理员 |
-| 有前缀 | `/核销 <记录编号> [备注]` | 切换核销状态 | 管理员 |
+| 有前缀 | `/核销 [通过\|驳回] <记录编号> [备注]` | 核销/驳回兑换订单并 @ 通知兑换者（未写动作默认通过，驳回退回积分恢复库存） | 管理员 |
 | 有前缀 | `/设置折扣 <ID> <折扣价> <截止时间>` | 设置兑换折扣 | 管理员 |
 | 有前缀 | `/清除折扣 <ID>` | 清除兑换折扣 | 管理员 |
 | 有前缀 | `/设置今日口令 <关键词> <积分>` | 设置每日口令（当日已有口令时提示"已覆盖"） | 管理员 |

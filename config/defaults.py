@@ -71,6 +71,32 @@ _PROBABILITY_KEYS = (
     "easter_unlucky_probability",
 )
 
+# 整数配置业务上限（超出拒绝）；未列出的整数键不设上限
+_INT_UPPER_BOUNDS = {
+    "lottery_cost": 1_000_000,
+    "lottery_daily_limit": 10_000,
+    "signin_fixed_points": 1_000_000,
+    "signin_random_min": 1_000_000,
+    "signin_random_max": 1_000_000,
+    "signin_first_bonus": 1_000_000,
+    "signin_day_first_bonus": 1_000_000,
+    "signin_consecutive_max": 100_000,
+    "signin_consecutive_bonus_per_day": 100_000,
+    "signin_weekly_bonus": 1_000_000,
+    "active_reward_points_min": 1_000_000,
+    "active_reward_points_max": 1_000_000,
+    "active_reward_min_length": 10_000,
+    "active_reward_cooldown": 86_400,
+    "active_reward_global_cooldown": 86_400,
+    "easter_lucky_pity_count": 1_000_000,
+    "easter_unlucky_pity_count": 1_000_000,
+    "birthday_bonus_points": 1_000_000,
+    "cmd_map_user_cooldown": 86_400,
+    "cmd_map_group_cooldown": 86_400,
+    "cmd_map_cache_ttl_hours": 87_600,
+    "backup_keep_count": 10_000,
+}
+
 
 def parse_keyword_list(raw):
     """将配置中的关键词解析为列表，兼容 JSON 数组或逗号分隔文本。"""
@@ -180,6 +206,9 @@ def validate_and_cast(key: str, raw: str):
             raise ValueError(f"\u914d\u7f6e {key} \u9700\u4e3a\u6574\u6570")
         if parsed < 0:
             raise ValueError(f"\u914d\u7f6e {key} \u4e0d\u80fd\u4e3a\u8d1f\u6570")
+        upper = _INT_UPPER_BOUNDS.get(key)
+        if upper is not None and parsed > upper:
+            raise ValueError(f"\u914d\u7f6e {key} \u4e0d\u80fd\u5927\u4e8e {upper}")
         return parsed
     if t is float:
         try:

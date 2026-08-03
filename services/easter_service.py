@@ -20,8 +20,17 @@ class EasterService:
     ) -> dict:
         """计算彩蛋结果与新的保底计数，不写库（写入由调用方在事务内完成）。"""
         events = await self._dao.get_active_easter_events()
-        lucky_events = [e for e in events if e["event_type"] == "lucky"]
-        unlucky_events = [e for e in events if e["event_type"] == "unlucky"]
+        # 过滤概率非正的事件：全零权重会使 random.choices 抛 ValueError
+        lucky_events = [
+            e
+            for e in events
+            if e["event_type"] == "lucky" and (e["probability"] or 0) > 0
+        ]
+        unlucky_events = [
+            e
+            for e in events
+            if e["event_type"] == "unlucky" and (e["probability"] or 0) > 0
+        ]
 
         new_lucky_pity = lucky_pity + 1
         new_unlucky_pity = unlucky_pity + 1

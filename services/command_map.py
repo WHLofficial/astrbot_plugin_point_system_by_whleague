@@ -539,6 +539,7 @@ class CommandMapCache:
                 try:
                     if path.stat().st_mtime < cutoff:
                         path.unlink(missing_ok=True)
+                        self._mem.pop(path.stem, None)
                 except OSError:
                     continue
         except OSError as e:

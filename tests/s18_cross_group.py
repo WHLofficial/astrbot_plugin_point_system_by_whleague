@@ -238,8 +238,9 @@ async def test_group_clear_semantics():
             point_service=PointService(t.db, t.dao),
         )
         handler = AdminHandler(plugin)
-        # u1 同时在 G1/G2，余额 50
-        await t.db.execute("INSERT INTO accounts (qq, points) VALUES ('u1',50)")
+        # u1 同时在 G1/G2，余额 50，带彩蛋保底与生日
+        await t.db.execute("INSERT INTO accounts (qq, points, lucky_pity, unlucky_pity, birthday, birthday_year) "
+                           "VALUES ('u1',50,7,3,'12-25',2025)")
         await t.db.execute("INSERT INTO users (qq, group_id) VALUES ('u1','100000')")
         await t.db.execute("INSERT INTO users (qq, group_id) VALUES ('u1','200000')")
         await t.db.execute("INSERT INTO accounts (qq, points) VALUES ('u2',10)")
@@ -254,7 +255,11 @@ async def test_group_clear_semantics():
         assert await t.count("users") == 3
         assert (await t.dao.get_account("u1"))["points"] == 0
         assert (await t.dao.get_account("u2"))["points"] == 0
-    return "群清空：共享积分清零、成员关系保留"
+        # 彩蛋保底与生日字段一并重置
+        row = await t.dao.get_account("u1")
+        assert row["lucky_pity"] == 0 and row["unlucky_pity"] == 0
+        assert row["birthday"] is None and row["birthday_year"] is None
+    return "群清空：共享积分清零、成员关系保留、彩蛋保底与生日重置"
 
 
 async def test_admin_subtract_negative_new_user():

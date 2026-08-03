@@ -237,6 +237,10 @@ class AdminHandler:
                 )
                 return
             item_id = parse_int(parts[1], min_val=1)
+            item = await self._plugin.dao.get_item(item_id)
+            if not item:
+                yield event.plain_result(f"物品 {item_id} 不存在")
+                return
             field = _ITEM_FIELD_ALIASES.get(parts[2], parts[2])
             raw_value = parts[3]
             if field == "cost":
@@ -245,8 +249,7 @@ class AdminHandler:
                 value = parse_int(raw_value, min_val=-1)
             elif field == "discount_price":
                 value = parse_int(raw_value, min_val=1)
-                item = await self._plugin.dao.get_item(item_id)
-                if item and value >= item["cost"]:
+                if value >= item["cost"]:
                     yield event.plain_result("折扣价应低于原价")
                     return
             elif field == "discount_end_time":
@@ -266,9 +269,6 @@ class AdminHandler:
                 return
             await self._plugin.dao.update_item_field(item_id, field, value)
             item = await self._plugin.dao.get_item(item_id)
-            if not item:
-                yield event.plain_result(f"物品 {item_id} 不存在")
-                return
             lines = [f"已修改物品 #{item_id}:"]
             lines.append(f"  · 名称: {item['name']}")
             if item["description"]:
@@ -765,7 +765,8 @@ class AdminHandler:
                 # 1. 清零本群成员的共享积分与签到状态（积分全局共享，跨群余额同步归零）
                 async with conn.execute(
                     "UPDATE accounts SET points=0, total_earned=0, last_sign_date=NULL, "
-                    "consecutive_days=0, total_sign_days=0, updated_at=datetime('now','localtime') "
+                    "consecutive_days=0, total_sign_days=0, lucky_pity=0, unlucky_pity=0, "
+                    "birthday=NULL, birthday_year=NULL, updated_at=datetime('now','localtime') "
                     "WHERE qq IN (SELECT qq FROM users WHERE group_id=?)",
                     (group_id,),
                 ) as cur:

@@ -34,37 +34,41 @@ class CommandMapHandler:
         self._render_lock = asyncio.Lock()
 
     async def handle(self, event) -> AsyncGenerator[MessageEventResult, None]:
-        qq = event.get_sender_id()
-        group_id = event.get_group_id() or ""
-        cfg = self._plugin.config_cache
-        user_cooldown = int(cfg.get("cmd_map_user_cooldown", 30))
-        group_cooldown = int(cfg.get("cmd_map_group_cooldown", 10))
-        ttl_seconds = int(cfg.get("cmd_map_cache_ttl_hours", 24)) * 3600
-        limiter = self._plugin.rate_limiter
-        if not limiter.check_user("cmd_map", qq, group_id, user_cooldown):
-            yield event.plain_result("指令图生成过于频繁，请稍后再试")
-            return
-        if not limiter.check_group("cmd_map", group_id, group_cooldown):
-            yield event.plain_result("本群指令图生成过于频繁，请稍后再试")
-            return
+        try:
+            qq = event.get_sender_id()
+            group_id = event.get_group_id() or ""
+            cfg = self._plugin.config_cache
+            user_cooldown = int(cfg.get("cmd_map_user_cooldown", 30))
+            group_cooldown = int(cfg.get("cmd_map_group_cooldown", 10))
+            ttl_seconds = int(cfg.get("cmd_map_cache_ttl_hours", 24)) * 3600
+            limiter = self._plugin.rate_limiter
+            if not limiter.check_user("cmd_map", qq, group_id, user_cooldown):
+                yield event.plain_result("指令图生成过于频繁，请稍后再试")
+                return
+            if not limiter.check_group("cmd_map", group_id, group_cooldown):
+                yield event.plain_result("本群指令图生成过于频繁，请稍后再试")
+                return
 
-        data = build_map_data(cfg)
-        sig = cache_signature(data)
-        markdown = build_markdown(data)
+            data = build_map_data(cfg)
+            sig = cache_signature(data)
+            markdown = build_markdown(data)
 
-        path = self.cache.get(sig, ttl_seconds)
-        if path:
-            yield event.image_result(path)
-            return
-
-        async with self._render_lock:
             path = self.cache.get(sig, ttl_seconds)
-            if not path:
-                path = await self._render_and_store(data, sig, ttl_seconds)
             if path:
                 yield event.image_result(path)
-            else:
-                yield event.plain_result(markdown)
+                return
+
+            async with self._render_lock:
+                path = self.cache.get(sig, ttl_seconds)
+                if not path:
+                    path = await self._render_and_store(data, sig, ttl_seconds)
+                if path:
+                    yield event.image_result(path)
+                else:
+                    yield event.plain_result(markdown)
+        except Exception as e:
+            logger.error(f"Command map error: {e}")
+            yield event.plain_result("指令图生成失败，请稍后再试")
 
     async def _render_and_store(
         self, data: dict, sig: str, ttl_seconds: float

@@ -383,12 +383,53 @@ async def test_date_reward_signin_integration():
     return "签到×日期奖励：消息命中关键词加分入账"
 
 
+async def test_easter_zero_probability_events():
+    """概率为 0 的事件被过滤：random.choices 不会因全零权重崩溃。"""
+    async with TempDB() as t:
+        from astrbot_plugin_point_system_by_whleague.services.easter_service import (
+            EasterService,
+        )
+
+        # 所有事件概率置 0（含保底触发路径）
+        await t.db.execute("UPDATE easter_events SET probability=0")
+        svc = EasterService(t.dao)
+        with patch_random(random=0.01):
+            r = await svc.trigger(
+                "u1",
+                "G1",
+                0,
+                0,
+                lucky_probability=0.02,
+                unlucky_probability=0.03,
+                lucky_pity_count=200,
+                unlucky_pity_count=200,
+            )
+            assert r["event"] is None
+            assert r["lucky_pity"] == 1 and r["unlucky_pity"] == 1
+        # 保底强制触发时也不崩溃（事件全被过滤 → event None，保底照常清零）
+        with patch_random(random=0.99):
+            r = await svc.trigger(
+                "u1",
+                "G1",
+                1,
+                0,
+                lucky_probability=0.02,
+                unlucky_probability=0.03,
+                lucky_pity_count=2,
+                unlucky_pity_count=200,
+            )
+            assert r["event"] is None
+            assert r["lucky_pity"] == 0
+    return "彩蛋：0 概率事件被过滤、概率与保底路径均不崩溃"
+
+
 TESTS = [
     ("easter_no_events", test_easter_no_events),
     ("easter_probability_branches", test_easter_probability_branches),
     ("easter_pity_force", test_easter_pity_force),
     ("easter_weighted_choice", test_easter_weighted_choice),
     ("easter_default_pity_no_force", test_easter_default_pity_no_force),
+    ("easter_zero_probability", test_easter_zero_probability_events),
     ("easter_signin_lucky", test_easter_signin_lucky_integration),
     ("easter_signin_unlucky", test_easter_signin_unlucky_integration),
     ("date_reward_check", test_date_reward_check_branches),

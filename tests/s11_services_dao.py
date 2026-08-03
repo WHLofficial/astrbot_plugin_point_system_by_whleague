@@ -571,12 +571,57 @@ async def test_dao_misc():
     return "DAO：播报幂等/字段白名单/排行过滤/生日查询"
 
 
+async def test_point_guard_earned_amount():
+    """守卫分支（change_balance guard_balance）下显式 earned_amount 也计入 total_earned。"""
+    async with TempDB() as t:
+        from astrbot_plugin_point_system_by_whleague.services.point_service import (
+            InsufficientPointsError,
+            PointService,
+        )
+
+        ps = PointService(t.db, t.dao)
+        await ps.add("u1", "G1", 100, "test")
+
+        async def _tx(conn):
+            return await PointService.change_balance(
+                conn,
+                "u1",
+                "G1",
+                -30,
+                "guarded_cost",
+                earned_amount=10,
+                guard_balance=30,
+            )
+
+        balance = await t.db.execute_transaction(_tx)
+        row = await t.dao.get_account("u1")
+        assert balance == 70
+        assert row["points"] == 70
+        # 守卫扣分 + 显式 earned_amount：total_earned 正确累计（100 + 10）
+        assert row["total_earned"] == 110
+        # 守卫失败路径：余额(70) < 守卫值(71) 时抛错且整体回滚
+        async def _bad_tx(conn):
+            return await PointService.change_balance(
+                conn, "u1", "G1", -1, "guarded_cost", guard_balance=71
+            )
+
+        try:
+            await t.db.execute_transaction(_bad_tx)
+            raise AssertionError("余额不足应抛 InsufficientPointsError")
+        except InsufficientPointsError:
+            pass
+        row = await t.dao.get_account("u1")
+        assert row["points"] == 70 and row["total_earned"] == 110
+    return "积分：守卫分支显式 earned_amount 累计正确、守卫失败原子回滚"
+
+
 TESTS = [
     ("lottery_edge_configs", test_lottery_edge_configs),
     ("lottery_unlimited_accounting", test_lottery_unlimited_and_accounting),
     ("redeem_edge_stocks", test_redeem_edge_stocks),
     ("redeem_discount_expired", test_redeem_discount_expired),
     ("point_earned_exclusion", test_point_earned_exclusion),
+    ("point_guard_earned_amount", test_point_guard_earned_amount),
     ("point_invalid_overdraw", test_point_invalid_and_overdraw),
     ("point_ref_admin_trace", test_point_ref_admin_trace),
     ("negative_title_bot_card", test_negative_title_with_bot_card),

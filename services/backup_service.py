@@ -69,4 +69,29 @@ class BackupService:
             n += 1
         escaped = str(dst).replace("'", "''")
         await self._db.execute(f"VACUUM INTO '{escaped}'")
+        self._prune_old_backups(dst_dir)
         return dst
+
+    def _prune_old_backups(self, dst_dir: Path) -> None:
+        """保留最近 N 份备份，超出删除最旧（0/未配置表示不清理）。
+
+        Args:
+            dst_dir: 备份目录（只清理本插件命名的 points_system_*.db）。
+        """
+        keep = int(self._config_cache.get("backup_keep_count", 30) or 0)
+        if keep <= 0:
+            return
+        try:
+            files = sorted(
+                dst_dir.glob("points_system_*.db"),
+                key=lambda p: p.stat().st_mtime,
+            )
+        except OSError as e:
+            logger.warning(f"Failed to list backups for pruning: {e}")
+            return
+        for stale in files[:-keep]:
+            try:
+                stale.unlink(missing_ok=True)
+                logger.info(f"Pruned old backup: {stale}")
+            except OSError as e:
+                logger.warning(f"Failed to prune backup {stale}: {e}")

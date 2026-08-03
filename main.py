@@ -136,6 +136,8 @@ class PointSystemPlugin(Star):
             val = self.config.get(key, default)
             if key in _LIST_KEYS:
                 cache[key] = parse_keyword_list(val)
+            elif key == "lottery_tiers":
+                cache[key] = self._sanitize_lottery_tiers(val)
             else:
                 cache[key] = val
 
@@ -165,6 +167,19 @@ class PointSystemPlugin(Star):
                 logger.info("Migrated legacy DB config into plugin config file.")
             await self.dao.clear_config()
         return cache
+
+    @staticmethod
+    def _sanitize_lottery_tiers(val) -> str:
+        """校验 lottery_tiers 配置，非法时回退默认档位并告警（防 WebUI 手改坏 JSON）。"""
+        from .config.defaults import DEFAULT_CONFIG, validate_and_cast
+
+        try:
+            return validate_and_cast("lottery_tiers", str(val))
+        except ValueError:
+            logger.warning(
+                f"Invalid lottery_tiers config, falling back to default: {val!r}"
+            )
+            return DEFAULT_CONFIG["lottery_tiers"]
 
     @staticmethod
     def _parse_hhmm(

@@ -73,6 +73,14 @@ class PointService:
                     raise InsufficientPointsError(
                         f"积分不足，需要 {guard_balance} 积分"
                     )
+            # 守卫分支（抽奖/兑换扣费等）默认不计累计获得；若确有正收益需
+            # 显式传入 earned_amount，此处同事务补记 total_earned。
+            if earned_amount and earned_amount > 0:
+                await conn.execute(
+                    "UPDATE accounts SET total_earned=total_earned+?, "
+                    "updated_at=datetime('now','localtime') WHERE qq=?",
+                    (earned_amount, qq),
+                )
         elif earned_amount:
             await conn.execute(
                 "UPDATE accounts SET points=points+?, total_earned=total_earned+?, updated_at=datetime('now','localtime') WHERE qq=?",

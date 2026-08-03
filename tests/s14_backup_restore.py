@@ -99,9 +99,37 @@ async def test_source_writable_after_backup():
     return "备份：空目录跳过、备份后源库可写"
 
 
+async def test_backup_keep_count():
+    """备份保留 N 份：超出删除最旧；0/未配置不清理。"""
+    async with TempDB() as t:
+        from astrbot_plugin_point_system_by_whleague.services.backup_service import (
+            BackupService,
+        )
+
+        dst = Path(tempfile.mkdtemp(prefix="bak_keep_"))
+        svc = BackupService(t.db, {"backup_keep_count": 2})
+        p1 = await svc.backup_unique(dst)
+        p2 = await svc.backup_unique(dst)
+        p3 = await svc.backup_unique(dst)
+        files = sorted(dst.glob("points_system_*.db"))
+        assert len(files) == 2, [f.name for f in files]
+        assert p3 in files and p2 in files
+        assert p1 not in files  # 最旧被清理
+        # 0 = 不清理
+        svc0 = BackupService(t.db, {"backup_keep_count": 0})
+        await svc0.backup_unique(dst)
+        assert len(list(dst.glob("points_system_*.db"))) == 3
+        # 未配置键（旧缓存）默认 30 份，不会误删现有备份
+        svc_legacy = BackupService(t.db, {})
+        await svc_legacy.backup_unique(dst)
+        assert len(list(dst.glob("points_system_*.db"))) == 4
+    return "备份：保留 N 份清理最旧、0/缺省不清理"
+
+
 TESTS = [
     ("backup_unique_sequence", test_backup_unique_sequence),
     ("backup_restore_consistency", test_backup_restore_consistency),
     ("backup_partial_failure", test_run_backup_partial_failure),
     ("backup_source_writable", test_source_writable_after_backup),
+    ("backup_keep_count", test_backup_keep_count),
 ]

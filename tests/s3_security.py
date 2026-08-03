@@ -311,9 +311,14 @@ async def test_numeric_boundaries():
             raise AssertionError(bad)
         except ValueError:
             pass
-    # 超大整数在 int 范围内通过但语义受限由业务层钳制
-    v = validate_and_cast("lottery_cost", "999999999")
-    assert v == 999999999
+    # 超大整数在业务上限内通过、超出上限拒绝
+    v = validate_and_cast("lottery_cost", "999999")
+    assert v == 999999
+    try:
+        validate_and_cast("lottery_cost", "999999999")
+        raise AssertionError("超上限应拒绝")
+    except ValueError:
+        pass
     # 负值拒绝
     for key in ("lottery_cost", "signin_fixed_points", "active_reward_points_min"):
         try:

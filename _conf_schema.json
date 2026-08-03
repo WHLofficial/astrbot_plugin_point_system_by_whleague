@@ -192,6 +192,12 @@
     "items": {"type": "string"},
     "default": []
   },
+  "backup_keep_count": {
+    "description": "备份保留份数",
+    "hint": "每个备份目录最多保留的备份文件数，超出自动删除最旧备份，0 表示不清理。",
+    "type": "int",
+    "default": 30
+  },
   "keyword_sign": {
     "description": "签到关键词",
     "hint": "触发签到的关键词列表。",

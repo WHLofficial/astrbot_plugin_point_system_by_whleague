@@ -341,6 +341,40 @@ async def test_handler_private_chat():
     return "私聊：无群场景可正常生成"
 
 
+async def test_handler_bad_config_value_fallback():
+    """配置值类型异常（如 WebUI 手改字符串）时返回兜底文案而非冒泡。"""
+    with tempfile.TemporaryDirectory() as td:
+        cfg = base_cfg()
+        cfg["cmd_map_user_cooldown"] = "abc"
+        plugin = _FakePlugin(cfg, td)
+        handler = CommandMapHandler(plugin, cache=cm.CommandMapCache(td))
+        out = await _collect_map(handler.handle(_MapEvent("u1", "G1")))
+        assert out and "生成失败" in out[0], out
+    return "兜底：非法配置类型不冒泡、返回失败文案"
+
+
+async def test_cache_sweep_syncs_mem():
+    """sweep 删除文件后 _mem 同步清除，get 不再返回已清扫路径。"""
+    with tempfile.TemporaryDirectory() as td:
+        cache = cm.CommandMapCache(td)
+        src = os.path.join(td, "render.png")
+        with open(src, "wb") as f:
+            f.write(b"imgdata")
+        path = cache.store("syncme", src)
+        assert cache.get("syncme") == path
+        old = time.time() - cm._CACHE_TTL - 60
+        os.utime(path, (old, old))
+        cache.sweep()
+        assert not os.path.exists(path)
+        assert "syncme" not in cache._mem
+        assert cache.get("syncme") is None
+        # 未过期条目不受影响
+        path2 = cache.store("freshkey", src)
+        cache.sweep()
+        assert cache.get("freshkey") == path2
+    return "缓存：sweep 同步 _mem、未过期条目保留"
+
+
 TESTS = [
     ("catalog_integrity", test_catalog_integrity),
     ("build_data_dynamic", test_build_data_dynamic),
@@ -357,4 +391,6 @@ TESTS = [
     ("handler_http_fallback", test_handler_http_result_treated_as_failure),
     ("handler_fallback_text", test_handler_fallback_plain_text),
     ("handler_private", test_handler_private_chat),
+    ("handler_bad_cfg", test_handler_bad_config_value_fallback),
+    ("cache_sweep_mem_sync", test_cache_sweep_syncs_mem),
 ]

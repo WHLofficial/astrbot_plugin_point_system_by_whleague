@@ -277,6 +277,67 @@ async def test_keyword_matcher_strict():
     return "关键词严格匹配：四功能边界/大小写/空白/附加文本全部正确"
 
 
+async def test_lottery_tiers_fallback_and_limits():
+    """lottery_tiers 非法回退默认档位；整数配置业务上限拒绝。"""
+    from astrbot_plugin_point_system_by_whleague.config.defaults import (
+        DEFAULT_CONFIG,
+        validate_and_cast,
+    )
+    from astrbot_plugin_point_system_by_whleague.main import PointSystemPlugin
+
+    # 非法 JSON / 缺 tiers / 非字符串 → 回退默认档位
+    for bad in ("not json", '{"tiers":[]}', '{"tiers":"x"}', 42, None):
+        out = PointSystemPlugin._sanitize_lottery_tiers(bad)
+        assert out == DEFAULT_CONFIG["lottery_tiers"], bad
+    # 合法档位保持原样
+    ok = '{"tiers":[{"label":"x","weight":2,"points_min":1,"points_max":5}]}'
+    assert PointSystemPlugin._sanitize_lottery_tiers(ok) == ok
+
+    # 整数上限：超出拒绝、边界值与默认值通过
+    assert validate_and_cast("lottery_cost", "1000000") == 1000000
+    assert validate_and_cast("lottery_daily_limit", "0") == 0
+    assert validate_and_cast("cmd_map_cache_ttl_hours", "87600") == 87600
+    assert validate_and_cast("backup_keep_count", "30") == 30
+    assert validate_and_cast("backup_keep_count", "0") == 0
+    for key, bad in (
+        ("lottery_cost", "1000001"),
+        ("lottery_daily_limit", "10001"),
+        ("signin_weekly_bonus", "1000001"),
+        ("active_reward_cooldown", "86401"),
+        ("cmd_map_cache_ttl_hours", "87601"),
+        ("backup_keep_count", "10001"),
+    ):
+        try:
+            validate_and_cast(key, bad)
+            raise AssertionError((key, bad))
+        except ValueError:
+            pass
+    # 新配置键已进入 DEFAULT_CONFIG（schema 同步）
+    assert "backup_keep_count" in DEFAULT_CONFIG
+    return "lottery_tiers：非法回退/合法保持；整数上限：拒绝/边界通过/默认兼容"
+
+
+async def test_lottery_draw_bad_tiers_runtime():
+    """运行时 lottery_tiers 解析失败返回明确错误而非 KeyError。"""
+    async with TempDB() as t:
+        from astrbot_plugin_point_system_by_whleague.services.lottery_service import (
+            LotteryService,
+        )
+        from astrbot_plugin_point_system_by_whleague.services.point_service import (
+            PointService,
+        )
+
+        cfg = {"lottery_enabled": True, "lottery_cost": 1, "lottery_tiers": "broken json",
+               "lottery_daily_limit": 0, "negative_disable_lottery": False}
+        svc = LotteryService(t.db, t.dao, PointService(t.db, t.dao), cfg)
+        await t.dao.ensure_account("u1")
+        await t.db.execute("UPDATE accounts SET points=10 WHERE qq='u1'")
+        r = await svc.draw("u1", "G1")
+        assert not r["success"]
+        assert "配置异常" in r["msg"], r
+    return "抽奖：坏 tiers 配置返回明确错误消息"
+
+
 TESTS = [
     ("parse_keyword_list", test_parse_keyword_list),
     ("day_boundary_parse", test_day_boundary_parse),
@@ -288,4 +349,6 @@ TESTS = [
     ("clean_display_name", test_clean_display_name),
     ("fetch_member_info", test_fetch_member_info),
     ("keyword_matcher_strict", test_keyword_matcher_strict),
+    ("lottery_tiers_fallback_limits", test_lottery_tiers_fallback_and_limits),
+    ("lottery_draw_bad_tiers", test_lottery_draw_bad_tiers_runtime),
 ]

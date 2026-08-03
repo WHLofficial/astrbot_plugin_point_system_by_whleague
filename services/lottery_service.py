@@ -36,11 +36,18 @@ class LotteryService:
                 return {"success": False, "msg": "积分为负，无法抽奖，请先签到恢复积分"}
 
         raw = self._cfg["lottery_tiers"]
-        if isinstance(raw, str):
-            data = json.loads(raw)
-        else:
-            data = raw
-        tiers = data["tiers"]
+        try:
+            if isinstance(raw, str):
+                data = json.loads(raw)
+            else:
+                data = raw
+            tiers = data["tiers"]
+        except (TypeError, ValueError, KeyError) as e:
+            logger.error(f"Invalid lottery_tiers config: {e}")
+            return {
+                "success": False,
+                "msg": "抽奖档位配置异常，请联系管理员",
+            }
         if not tiers:
             return {
                 "success": False,

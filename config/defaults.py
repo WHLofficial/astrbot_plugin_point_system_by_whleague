@@ -3,7 +3,7 @@ import math
 import os
 import re
 
-PLUGIN_VERSION = "0.3.1"
+PLUGIN_VERSION = "0.3.2"
 """插件版本号。
 
 需要与 metadata.yaml 的 version 保持一致（发布时同步更新）。

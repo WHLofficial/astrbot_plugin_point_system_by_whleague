@@ -37,7 +37,7 @@
 | 10 | **管理员指令** | 独立管理员名单（bot 主人自动为管理员），@或 QQ 号增减积分，管理兑换/口令/配置 |
 | 11 | **生日系统** | 记录生日（MM-DD / MM月DD日），生日签到奖励，定时播报当日寿星 |
 | 12 | **负分联动** | 负分仅可签到恢复积分，不能抽奖/兑换/活跃奖励，自动分配/撤销"群女仆X号"头衔 |
-| 13 | **自动备份** | 多本地目标目录（`backup_dirs` 配置），定时备份（默认 04:00），`VACUUM INTO` 一致性快照 |
+| 13 | **自动备份** | 多本地目标目录（`backup_dirs` 配置），定时备份（默认 04:00），`VACUUM INTO` 一致性快照，每目录仅保留最近 `backup_keep_count` 份 |
 | 14 | **积分流水** | 每笔积分变动自动记录（时间、原因、变动值、余额），用户可查明细 |
 | 15 | **签到统计** | 查询今日签到人数、签到率、首签用户、连签王 |
 | 16 | **每日运势** | 签到回复尾部自动附带运势文本（同用户同天一致，纯趣味不涉及积分） |
@@ -376,6 +376,7 @@ CREATE TABLE IF NOT EXISTS plugin_config (
 | backup_enabled | bool | true | 开关 |
 | backup_time | str | 04:00 | 每日自动备份时刻 |
 | backup_dirs | json | [] | 备份目标目录列表（相对路径基于插件数据目录） |
+| backup_keep_count | int | 30 | 每备份目录保留份数（0=不清理） |
 | **关键词** | | | |
 | keyword_sign | json | ["签到","sign","打卡"] | 签到触发关键词列表 |
 | keyword_lottery | json | ["抽奖","lottery"] | 抽奖触发关键词列表 |
@@ -919,6 +920,7 @@ async def change_balance(conn, qq, group_id, amount, reason, *,
 - `terminate()` 中清理所有定时任务
 - 备份使用 `VACUUM INTO`（含 WAL 数据），目标已存在时自动追加序号
 - 备份目标目录不存在时自动创建
+- 备份保留策略：每目录仅保留最近 `backup_keep_count` 份（默认 30，0=不清理），超出删除最旧（仅清理本插件 `points_system_*.db` 命名文件）
 
 ---
 
@@ -950,7 +952,7 @@ async def change_balance(conn, qq, group_id, amount, reason, *,
 | 昵称防注入 | 所有群昵称/发送者昵称拼装点统一 `clean_display_name` 剥离控制字符（运势/排行/查生日/活跃奖励） |
 | SQL 注入 | 所有 DAO 使用 `?` 占位符，零字符串拼接 |
 | 生命周期 | `initialize()` 建表+启动任务；`terminate()` 关闭连接+清理任务 |
-| 备份 | `VACUUM INTO` 一致快照（含 WAL 数据），目标已存在自动追加序号；目录不存在时自动创建 |
+| 备份 | `VACUUM INTO` 一致快照（含 WAL 数据），目标已存在自动追加序号；目录不存在时自动创建；每目录仅保留最近 `backup_keep_count` 份 |
 
 ---
 
@@ -987,7 +989,7 @@ async def change_balance(conn, qq, group_id, amount, reason, *,
 | `services/date_reward_service.py` | 50 | 日期匹配（跨年） |
 | `services/daily_keyword_service.py` | 40 | 每日口令 |
 | `services/birthday_service.py` | 60 | 定时播报 |
-| `services/backup_service.py` | 60 | 文件拷贝备份 |
+| `services/backup_service.py` | 77 | VACUUM INTO 快照备份 + 保留策略 |
 | **合计** | **~2200** | |
 
 ---

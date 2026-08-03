@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.3.1 (2026-08-03)
+
+### 修复
+
+- 修复禁用/重载插件时**定时任务从未被真正移除**导致的重复任务累积：`_remove_cron_jobs` 原先调用不存在的 `job.remove()`（`CronJob` 为数据对象，异常被静默吞掉），备份/生日播报任务在每次启用、重载或 `/设置` 热更新后都会在调度器与 `cron_jobs` 表中新增一组，随时间累积大量每日重复触发任务；现改为经 `cron_manager.delete_job(job_id)` 从调度器、处理器注册与数据库三处移除（旧版 AstrBot 无该 API 时回退原逻辑）
+- 初始化时幂等清理历史遗留的本插件非持久化 cron 任务行（`persistent=0`、`job_type=basic` 且名称为 `points_backup` / `birthday_announce`，精确匹配不影响其他插件的定时任务），已累积的残留行自动自愈，无需手工删库
+
+### 测试
+
+- 更新 s10：`_remove_cron_jobs` 改为断言 `cron_manager.delete_job(job_id)` 被调用（旧断言仅验证 mock 的 `remove`，无法覆盖真实路径）；`FakeContext` 新增 `delete_job` / `list_jobs` mock；新增存量清理测试（持久化任务、其他插件任务、active_agent 任务均不受影响）
+
 ## v0.3.0 (2026-08-03)
 
 ### 新增

@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.4.1 (2026-08-03)
+
+### 修复
+
+- 打劫「打劫@群友」无任何响应：`parse_rob_message` 组件类型判定用 `str(c.type).lower()` 与 `"at"/"plain"` 比较，而真实平台组件 `type` 为 str 枚举（`str(ComponentType.Plain)` 返回全名 `"ComponentType.Plain"` 而非成员值 `"Plain"`），二者永不相等 → 目标/文本永不被识别，handler 静默不产出；改为 `==` 直接比较（str 枚举成员与字符串相等），兼容真实枚举、测试桩字符串与大小写
+
+### 测试
+
+- 新增回归用例 `matcher_real_enum`（s19）：以 `str, Enum` 模拟真实组件 type（修复前失败、修复后通过），并清理函数内 import 排序；全量 **185/185** 通过
+
 ## v0.4.0 (2026-08-03)
 
 ### 新增

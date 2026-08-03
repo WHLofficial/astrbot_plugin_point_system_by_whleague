@@ -1,6 +1,6 @@
 # 积分系统插件 — 完整设计文档
 
-> 版本: v1.2  
+> 版本: v1.3  
 > 更新时间: 2026-08-03
 
 ---
@@ -978,6 +978,9 @@ rob(qq, target_qq, group_id, bot=None):
 ### 7.15b 打劫触发形态（v0.4.0）
 
 - 消息组件解析（`event.get_messages()`，组件属性 duck-typing，不依赖 isinstance）：
+  - **类型判定必须用 `==` 直接比较**（如 `c.type == "At"` / `in ("At","at")`）：真实组件
+    `type` 为 str 枚举（`str(ComponentType.Plain)` 返回全名 `"ComponentType.Plain"`），
+    用 `str(c.type).lower()` 比较会永不命中（v0.4.1 修复）
   - `At` 段（排除 AtAll `qq=="all"` 与 `qq==self_qq`）→ 有效目标，取第一个；多个 → 提示"一次只能打劫一个目标"
   - 其余 `Plain` 段拼接 → 压缩空白后严格等于某打劫关键词（顺序无关）
   - 无有效目标：存在 @all/@bot → "不能打劫机器人/全体成员"；纯关键词无 @ → "用法: 打劫 @目标"；非打劫形态静默

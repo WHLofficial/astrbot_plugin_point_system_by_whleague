@@ -248,6 +248,130 @@ async def test_no_cooldown_when_zero():
     return "打劫：rob_cooldown=0 不拦截"
 
 
+# ─── 防集火：目标每日被劫上限 + 收益衰减 ──────────────────
+
+
+async def test_target_daily_limit():
+    """目标每日被劫上限（默认 6，全部次数口径）：6 人集火后第 7 个被拒，
+    被拒打劫者已消耗冷却。"""
+    async with TempDB() as t:
+        cfg, ps, rs, lim = await _build(t)
+        await _grant(ps, "10002", "1001", 2000)  # 目标
+        for i in range(6):
+            robber = f"1010{i + 1}"
+            await _grant(ps, robber, "1001", 1000)
+            with patch_random(random=0.1):
+                r = await rs.rob(robber, "10002", "1001")
+            assert r["performed"] is True and r["success"] is True, (i, r)
+        # 第 7 个打劫者被目标限次拦截（精确次数文案）
+        await _grant(ps, "10107", "1001", 1000)
+        r7 = await rs.rob("10107", "10002", "1001")
+        assert r7["performed"] is False
+        assert "目标今日已被打劫 6 次" in r7["msg"]
+        # 拦截已消耗打劫者冷却：再打劫其他目标也被冷却拦截
+        await _grant(ps, "90001", "1001", 500)
+        r8 = await rs.rob("10107", "90001", "1001")
+        assert r8["performed"] is False and "冷却中" in r8["msg"]
+        # 拦截不产生记录
+        cnt = await t.db.fetchone(
+            "SELECT COUNT(*) AS c FROM rob_records WHERE qq='10107'"
+        )
+        assert cnt["c"] == 0
+    return "防集火：目标每日被劫上限拦截、精确次数文案、拦截消耗冷却"
+
+
+async def test_target_limit_zero_decay_still_active():
+    """rob_target_daily_limit=0（不限）时放行，但收益衰减仍生效（防长期集火）。"""
+    async with TempDB() as t:
+        cfg = base_cfg(rob_cooldown=0, rob_target_daily_limit=0, rob_daily_limit=0)
+        _, ps, rs, lim = await _build(t, cfg)
+        await _grant(ps, "10111", "1001", 5000)
+        await _grant(ps, "90001", "1001", 10000)  # cap 触顶目标
+        stolen_seq = []
+        for _ in range(7):
+            with patch_random(random=0.1):
+                r = await rs.rob("10111", "90001", "1001")
+            assert r["performed"] is True and r["success"] is True
+            stolen_seq.append(r["stolen"])
+        # 衰减 0.75^n：200/150/112/84/63/47/36（round 银行家舍入）
+        assert stolen_seq == [200, 150, 112, 84, 63, 47, 36], stolen_seq
+    return "防集火：上限 0=不限放行且衰减仍生效"
+
+
+async def test_decay_sequence():
+    """收益衰减序列：cap 触顶目标连续成功 → 200/150/112/84/63（0.75^n）。"""
+    async with TempDB() as t:
+        cfg = base_cfg(rob_cooldown=0, rob_daily_limit=0)
+        _, ps, rs, lim = await _build(t, cfg)
+        await _grant(ps, "10121", "1001", 1000)
+        await _grant(ps, "90001", "1001", 10000)
+        stolen_seq = []
+        for _ in range(5):
+            with patch_random(random=0.1):
+                r = await rs.rob("10121", "90001", "1001")
+            assert r["performed"] is True and r["success"] is True
+            stolen_seq.append(r["stolen"])
+        assert stolen_seq == [200, 150, 112, 84, 63], stolen_seq
+    return "防集火：收益衰减序列 200/150/112/84/63"
+
+
+async def test_decay_failure_not_counted():
+    """衰减仅按成功次数：失败打劫不压低后续成功收益（仍 100 全额）。"""
+    async with TempDB() as t:
+        cfg, ps, rs, lim = await _build(t)
+        await _grant(ps, "10131", "1001", 1000)
+        await _grant(ps, "10132", "1001", 1000)
+        await _grant(ps, "10002", "1001", 2000)
+        with patch_random(random=0.9):
+            r_fail = await rs.rob("10131", "10002", "1001")
+        assert r_fail["performed"] is True and r_fail["success"] is False
+        with patch_random(random=0.1):
+            r_win = await rs.rob("10132", "10002", "1001")
+        assert r_win["performed"] is True and r_win["success"] is True
+        assert r_win["stolen"] == 100  # win_hits=0 → 全额，失败不计数
+    return "防集火：衰减仅成功次数（失败不压低收益）"
+
+
+async def test_decay_zero():
+    """rob_reward_decay=0：不衰减，序列恒 200。"""
+    async with TempDB() as t:
+        cfg = base_cfg(rob_cooldown=0, rob_reward_decay=0)
+        _, ps, rs, lim = await _build(t, cfg)
+        await _grant(ps, "10141", "1001", 1000)
+        await _grant(ps, "90001", "1001", 10000)
+        seq = []
+        for _ in range(3):
+            with patch_random(random=0.1):
+                r = await rs.rob("10141", "90001", "1001")
+            assert r["performed"] is True and r["success"] is True
+            seq.append(r["stolen"])
+        assert seq == [200, 200, 200], seq
+    return "防集火：decay=0 不衰减"
+
+
+async def test_decay_one_floor():
+    """rob_reward_decay=1.0：首次全额（0^0=1），后续收益归零走防御路径不报错。"""
+    async with TempDB() as t:
+        cfg = base_cfg(rob_cooldown=0, rob_reward_decay=1.0)
+        _, ps, rs, lim = await _build(t, cfg)
+        await _grant(ps, "10151", "1001", 1000)
+        await _grant(ps, "90001", "1001", 10000)
+        with patch_random(random=0.1):
+            r1 = await rs.rob("10151", "90001", "1001")
+        assert r1["performed"] is True and r1["stolen"] == 200
+        with patch_random(random=0.1):
+            r2 = await rs.rob("10151", "90001", "1001")
+        assert r2["performed"] is True and r2["success"] is True
+        assert r2["stolen"] == 0  # 衰减归零
+        assert r2["balance"] == 1000 + 200  # 无变动
+        assert r2["target_balance"] == 9800
+        rec = await t.db.fetchone(
+            "SELECT success, stolen FROM rob_records WHERE qq='10151' ORDER BY id DESC"
+        )
+        assert rec["success"] == 1 and rec["stolen"] == 0
+    return "防集火：decay=1.0 归零走防御路径不报错"
+
+
 async def test_zero_stolen_config_defensive():
     """极端配置（rob_reward_fixed/cap=0）下收益为 0：不触发 change_balance(0) 报错。"""
     async with TempDB() as t:
@@ -532,6 +656,12 @@ TESTS = [
     ("target_negative_title", test_target_negative_title_linkage),
     ("failure_guard_atomic", test_failure_guard_atomic_rollback),
     ("no_cooldown_when_zero", test_no_cooldown_when_zero),
+    ("target_daily_limit", test_target_daily_limit),
+    ("target_limit_zero_decay", test_target_limit_zero_decay_still_active),
+    ("decay_sequence", test_decay_sequence),
+    ("decay_failure_not_counted", test_decay_failure_not_counted),
+    ("decay_zero", test_decay_zero),
+    ("decay_one_floor", test_decay_one_floor),
     ("zero_stolen_defensive", test_zero_stolen_config_defensive),
     ("negative_target_defensive", test_negative_target_points_defensive),
     ("matcher_rob", test_matcher_rob_message),

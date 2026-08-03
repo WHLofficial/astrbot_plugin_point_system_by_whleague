@@ -212,6 +212,79 @@
     "items": {"type": "string"},
     "default": ["抽奖", "lottery"]
   },
+  "rob_enabled": {
+    "description": "启用打劫",
+    "hint": "是否开放打劫功能。",
+    "type": "bool",
+    "default": true
+  },
+  "rob_cost": {
+    "description": "打劫成本(积分)",
+    "hint": "每次打劫失败时扣除的积分，成功不扣成本。",
+    "type": "int",
+    "default": 50
+  },
+  "rob_success_rate": {
+    "description": "打劫成功率",
+    "hint": "每次打劫成功的概率，0~1 之间的小数。",
+    "type": "float",
+    "default": 0.35
+  },
+  "rob_reward_fixed": {
+    "description": "打劫固定收益(积分)",
+    "hint": "打劫成功的基础收益，目标积分为锚点积分时动态收益等于该值。",
+    "type": "int",
+    "default": 50
+  },
+  "rob_reward_base_points": {
+    "description": "打劫收益锚点积分",
+    "hint": "目标积分达到该值时动态收益等于固定收益（锚点）。",
+    "type": "int",
+    "default": 2000
+  },
+  "rob_reward_power": {
+    "description": "打劫收益幂指数",
+    "hint": "收益曲线的幂指数，大于 1 为凸曲线（高分目标收益递增），0~2 之间合法。",
+    "type": "float",
+    "default": 1.2
+  },
+  "rob_reward_cap": {
+    "description": "打劫单次收益上限",
+    "hint": "单次打劫成功可获得的总收益上限。",
+    "type": "int",
+    "default": 200
+  },
+  "rob_min_points": {
+    "description": "打劫者积分门槛",
+    "hint": "发起打劫所需的当前积分下限。",
+    "type": "int",
+    "default": 100
+  },
+  "rob_target_min_points": {
+    "description": "打劫目标积分门槛",
+    "hint": "目标当前积分需达到该值才可被劫，低于则无油水可捞。",
+    "type": "int",
+    "default": 50
+  },
+  "rob_cooldown": {
+    "description": "打劫冷却(秒)",
+    "hint": "同一用户成功或失败后再次打劫的最小间隔秒数，0 表示不限。",
+    "type": "int",
+    "default": 600
+  },
+  "rob_daily_limit": {
+    "description": "每日打劫次数上限",
+    "hint": "每人每天最多打劫次数（按 QQ 全局统计），0 表示不限。",
+    "type": "int",
+    "default": 3
+  },
+  "keyword_rob": {
+    "description": "打劫关键词",
+    "hint": "触发打劫的关键词列表，消息须为「关键词 @目标」形态。注意：修改关键词后需同步 main.py 中 on_rob 的粗筛正则（默认硬编码\"打劫\"），否则新词无法触发。",
+    "type": "list",
+    "items": {"type": "string"},
+    "default": ["打劫"]
+  },
   "cmd_map_user_cooldown": {
     "description": "指令图用户冷却(秒)",
     "hint": "同一用户生成指令图的最小间隔秒数，0 表示不限。",

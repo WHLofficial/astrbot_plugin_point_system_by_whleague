@@ -57,6 +57,12 @@ _COMMAND_SECTIONS = [
                 "usage": "我的积分",
                 "desc": "查询我的当前积分 / 累计签到 / 连签 / 今日签到 / 本群排名 / 最近流水",
             },
+            {
+                "trigger": "keyword",
+                "name": "{rob_kw} @目标",
+                "usage": "打劫 @目标",
+                "desc": "打劫群友抢积分，失败扣成本",
+            },
         ],
     },
     {
@@ -315,12 +321,15 @@ _POSTER_TEMPLATE = """<!doctype html>
 """
 
 
-def _fill(template: str, sign_text: str, lottery_text: str, passphrase: str) -> str:
+def _fill(
+    template: str, sign_text: str, lottery_text: str, passphrase: str, rob_text: str
+) -> str:
     """Substitute runtime keyword placeholders into a catalog entry string."""
     return (
         template.replace("{sign_kw}", sign_text)
         .replace("{lottery_kw}", lottery_text)
         .replace("{passphrase}", passphrase)
+        .replace("{rob_kw}", rob_text)
     )
 
 
@@ -335,9 +344,11 @@ def build_map_data(config_cache: dict) -> dict:
     """
     sign_kw = config_cache.get("keyword_sign", []) or ["签到"]
     lottery_kw = config_cache.get("keyword_lottery", []) or ["抽奖"]
+    rob_kw = config_cache.get("keyword_rob", []) or ["打劫"]
     passphrase = str(config_cache.get("lottery_passphrase", "whl"))
     sign_text = " / ".join(str(k) for k in sign_kw)
     lottery_text = " / ".join(str(k) for k in lottery_kw)
+    rob_text = " / ".join(str(k) for k in rob_kw)
     sections = []
     for section in _COMMAND_SECTIONS:
         entries = []
@@ -345,8 +356,12 @@ def build_map_data(config_cache: dict) -> dict:
             entries.append(
                 {
                     **entry,
-                    "name": _fill(entry["name"], sign_text, lottery_text, passphrase),
-                    "usage": _fill(entry["usage"], sign_text, lottery_text, passphrase),
+                    "name": _fill(
+                        entry["name"], sign_text, lottery_text, passphrase, rob_text
+                    ),
+                    "usage": _fill(
+                        entry["usage"], sign_text, lottery_text, passphrase, rob_text
+                    ),
                 }
             )
         sections.append({**section, "entries": entries})

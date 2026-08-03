@@ -33,6 +33,16 @@ class RateLimiter:
         self._user_cooldowns[key] = now
         return True
 
+    def get_remaining(
+        self, action: str, qq: str, group_id: str, cooldown: int
+    ) -> float:
+        """冷却剩余秒数；cooldown<=0 或未在冷却中时返回 0。"""
+        if cooldown <= 0:
+            return 0
+        key = self._user_key(action, qq, group_id)
+        remaining = cooldown - (time.time() - self._user_cooldowns.get(key, 0))
+        return max(remaining, 0)
+
     def check_group(self, action: str, group_id: str, cooldown: int) -> bool:
         if cooldown <= 0:
             return True

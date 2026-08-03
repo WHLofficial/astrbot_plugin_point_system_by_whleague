@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from ..utils.helpers import today_str
+from ..utils.helpers import period_start_str, today_str
 
 
 class PointDAO:
@@ -430,6 +430,39 @@ class PointDAO:
             (kw_id, qq),
         )
         return row is not None
+
+    # ─── rob_records ─────────────────────────────────────
+
+    @staticmethod
+    async def count_robs_today(conn, qq: str) -> int:
+        """统计用户本业务日的打劫次数（必须在事务回调内用传入的 conn 调用）。
+
+        与 lottery 每日限次口径一致：按 QQ 全局统计（跨群共享钱包），
+        以 period_start_str() 为区间起点。
+        """
+        async with conn.execute(
+            "SELECT COUNT(*) AS cnt FROM rob_records WHERE qq=? AND created_at>=?",
+            (qq, period_start_str()),
+        ) as cur:
+            row = await cur.fetchone()
+        return row["cnt"] if row else 0
+
+    @staticmethod
+    async def insert_rob_record(
+        conn,
+        qq: str,
+        target_qq: str,
+        group_id: str,
+        cost: int,
+        stolen: int,
+        success: bool,
+    ):
+        """写入打劫记录（必须在事务回调内用传入的 conn 调用）。"""
+        await conn.execute(
+            "INSERT INTO rob_records (qq, target_qq, group_id, cost, stolen, success) "
+            "VALUES (?,?,?,?,?,?)",
+            (qq, target_qq, group_id, cost, stolen, 1 if success else 0),
+        )
 
     # ─── plugin_config ────────────────────────────────────
 

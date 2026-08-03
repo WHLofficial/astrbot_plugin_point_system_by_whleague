@@ -66,3 +66,52 @@ def is_my_points_message(text: str) -> bool:
     if not text:
         return False
     return any(_equals(text, kw) for kw in _MY_POINTS_KEYWORDS)
+
+
+def parse_rob_message(components, rob_keywords, self_qq) -> dict:
+    """打劫形态消息解析（v0.4.0）：At 段与关键词分离，组件属性 duck-typing 判定。
+
+    打劫形态 = 消息含有效 @ 目标（排除 AtAll 与 bot 自身），
+    且其余 Plain 文本压缩空白后严格等于某打劫关键词（顺序无关）。
+
+    Args:
+        components: event.get_messages() 返回的消息组件列表。
+        rob_keywords: 打劫关键词列表。
+        self_qq: bot 自身 QQ（排除 @bot）。
+
+    Returns:
+        {
+            "targets": list[str],      # 有效 @ 目标，保序
+            "has_invalid_at": bool,    # 是否存在 @all / @bot 等无效 @
+            "text_match": bool,        # 其余 Plain 文本是否严格等于某打劫关键词
+        }
+    """
+    keywords = _normalize_keywords(rob_keywords)
+    targets = []
+    invalid_at = False
+    texts = []
+    self_id = str(self_qq) if self_qq is not None else ""
+    for c in components or []:
+        ctype = str(getattr(c, "type", "")).lower()
+        if ctype == "at":
+            qq_raw = getattr(c, "qq", None)
+            q = str(qq_raw) if qq_raw is not None else ""
+            if not q or q.lower() == "all" or q == self_id:
+                invalid_at = True
+            else:
+                targets.append(q)
+        elif ctype == "plain":
+            texts.append(getattr(c, "text", ""))
+    norm_text = _norm("".join(texts)).lower()
+    text_match = any(norm_text == _norm(k).lower() for k in keywords)
+    return {
+        "targets": targets,
+        "has_invalid_at": invalid_at,
+        "text_match": text_match,
+    }
+
+
+def is_rob_message(components, rob_keywords, self_qq) -> bool:
+    """打劫触发判定：含有效 @ 目标且其余 Plain 文本严格等于某打劫关键词。"""
+    parsed = parse_rob_message(components, rob_keywords, self_qq)
+    return bool(parsed["targets"]) and parsed["text_match"]

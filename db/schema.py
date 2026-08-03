@@ -1,6 +1,6 @@
 from astrbot.api import logger
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 SQL_CREATE_TABLES = r"""
 
@@ -185,6 +185,20 @@ CREATE TABLE IF NOT EXISTS daily_keyword_claim (
 
 CREATE INDEX IF NOT EXISTS idx_dk_claim_group ON daily_keyword_claim(group_id, qq);
 CREATE INDEX IF NOT EXISTS idx_dk_claim_qq_date ON daily_keyword_claim(qq, created_at);
+
+CREATE TABLE IF NOT EXISTS rob_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    qq TEXT NOT NULL,
+    target_qq TEXT NOT NULL,
+    group_id TEXT NOT NULL,
+    cost INTEGER NOT NULL,
+    stolen INTEGER NOT NULL DEFAULT 0,
+    success INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_rob_qq_date ON rob_records(qq, created_at);
+CREATE INDEX IF NOT EXISTS idx_rob_target ON rob_records(target_qq);
 
 CREATE TABLE IF NOT EXISTS plugin_config (
     key TEXT PRIMARY KEY,

@@ -6,6 +6,7 @@ from astrbot.api.event import MessageChain
 from ..utils.keyword_matcher import (
     is_lottery_message,
     is_my_points_message,
+    is_rob_message,
     is_signin_message,
 )
 from ..utils.security import clean_display_name
@@ -23,6 +24,14 @@ class ActiveRewardHandler:
 
             # 命令消息（以唤醒前缀开头或 @bot）不参与活跃奖励与每日口令
             if event.is_at_or_wake_command:
+                return
+
+            # 打劫形态消息不参与活跃奖励与每日口令（防双收益刷分）
+            if is_rob_message(
+                event.get_messages(),
+                self._plugin.config_cache.get("keyword_rob", []),
+                event.get_self_id(),
+            ):
                 return
 
             msg = event.get_message_str()

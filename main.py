@@ -82,6 +82,16 @@ class PointSystemPlugin(Star):
         self.lottery_service = LotteryService(
             self.db, self.dao, self.point_service, self.config_cache
         )
+
+        from .services.rob_service import RobService
+
+        self.rob_service = RobService(
+            self.db,
+            self.dao,
+            self.point_service,
+            self.config_cache,
+            self.rate_limiter,
+        )
         self.redeem_service = RedeemService(self.db, self.dao, self.point_service)
         self.ranking_service = RankingService(self.dao)
         self.daily_keyword_service = DailyKeywordService(
@@ -97,6 +107,7 @@ class PointSystemPlugin(Star):
         from .handlers.my_points import MyPointsHandler
         from .handlers.ranking import RankingHandler
         from .handlers.redeem import RedeemHandler
+        from .handlers.rob import RobHandler
         from .handlers.sign_in import SignInHandler
 
         self.sign_in_handler = SignInHandler(self)
@@ -107,6 +118,7 @@ class PointSystemPlugin(Star):
         self.birthday_handler = BirthdayHandler(self)
         self.active_reward_handler = ActiveRewardHandler(self)
         self.my_points_handler = MyPointsHandler(self)
+        self.rob_handler = RobHandler(self)
 
         from .handlers.command_map import CommandMapHandler
 
@@ -414,6 +426,22 @@ class PointSystemPlugin(Star):
             return
         produced = False
         async for result in self.my_points_handler.handle(event):
+            produced = True
+            yield result
+        if produced:
+            event.stop_event()
+
+    # ═══════════════════════════════════════════════════════════
+    # Handlers: Rob
+    # ═══════════════════════════════════════════════════════════
+
+    @filter.regex(r"\u6253\u52ab")
+    async def on_rob(
+        self, event: AstrMessageEvent
+    ) -> AsyncGenerator[MessageEventResult, None]:
+        # 粗筛后由 handler 严格解析（@ 目标 + 关键词形态），不命中不产出不拦截
+        produced = False
+        async for result in self.rob_handler.handle(event):
             produced = True
             yield result
         if produced:

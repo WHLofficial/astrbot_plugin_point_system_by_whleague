@@ -3,7 +3,7 @@ import math
 import os
 import re
 
-PLUGIN_VERSION = "0.3.2"
+PLUGIN_VERSION = "0.4.0"
 """插件版本号。
 
 需要与 metadata.yaml 的 version 保持一致（发布时同步更新）。
@@ -61,7 +61,8 @@ TYPE_MAP = {key: _TYPE_MAP[meta["type"]] for key, meta in _SCHEMA.items()}
 _KEYWORD_KEYS = tuple(
     key
     for key, meta in _SCHEMA.items()
-    if meta["type"] == "list" and key in ("keyword_sign", "keyword_lottery")
+    if meta["type"] == "list"
+    and key in ("keyword_sign", "keyword_lottery", "keyword_rob")
 )
 _LIST_KEYS = tuple(key for key, meta in _SCHEMA.items() if meta["type"] == "list")
 
@@ -69,7 +70,11 @@ _PROBABILITY_KEYS = (
     "active_reward_probability",
     "easter_lucky_probability",
     "easter_unlucky_probability",
+    "rob_success_rate",
 )
+
+# float 配置的幂指数类校验范围（区别于 0~1 概率键）
+_POWER_KEYS = ("rob_reward_power",)
 
 # 整数配置业务上限（超出拒绝）；未列出的整数键不设上限
 _INT_UPPER_BOUNDS = {
@@ -217,5 +222,7 @@ def validate_and_cast(key: str, raw: str):
             raise ValueError(f"\u914d\u7f6e {key} \u9700\u4e3a\u6570\u5b57")
         if key in _PROBABILITY_KEYS and not (0.0 <= parsed <= 1.0):
             raise ValueError(f"{key} \u9700\u5728 0~1 \u4e4b\u95f4")
+        if key in _POWER_KEYS and not (0.0 <= parsed <= 2.0):
+            raise ValueError(f"{key} \u9700\u5728 0~2 \u4e4b\u95f4")
         return parsed
     return raw

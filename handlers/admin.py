@@ -336,7 +336,7 @@ class AdminHandler:
     def _reserved_keyword_reason(self, keyword: str) -> str | None:
         """判断口令关键词是否与触发词冲突（保留字），冲突返回提示文案。
 
-        触发词 = keyword_sign ∪ keyword_lottery ∪ 排行关键词。
+        触发词 = keyword_sign ∪ keyword_lottery ∪ keyword_rob ∪ 排行关键词。
         冲突形态（压缩空白、大小写不敏感比较）：
           1. 关键词本身就是触发词
           2. 口令 + 触发词（如 "whl抽奖"）
@@ -345,13 +345,14 @@ class AdminHandler:
         cfg = self._plugin.config_cache
         reserved = set(cfg.get("keyword_sign", []))
         reserved |= set(cfg.get("keyword_lottery", []))
+        reserved |= set(cfg.get("keyword_rob", []))
         reserved |= {"排行", "排名", "积分榜"}
         passphrase = str(cfg.get("lottery_passphrase", "") or "")
 
         norm = lambda s: "".join(s.split()).lower()  # noqa: E731
         norm_k = norm(keyword)
         if any(norm_k == norm(t) for t in reserved):
-            return "口令不能与签到/抽奖/排行触发词相同"
+            return "口令不能与签到/抽奖/排行/打劫触发词相同"
         if passphrase:
             p_n = norm(passphrase)
             for t in reserved:
@@ -414,7 +415,7 @@ class AdminHandler:
                         "active_reward_points_max 不能小于 active_reward_points_min"
                     )
                     return
-            if key in ("keyword_sign", "keyword_lottery", "backup_dirs"):
+            if key in ("keyword_sign", "keyword_lottery", "keyword_rob", "backup_dirs"):
                 stored = json.dumps(parsed, ensure_ascii=False)
             else:
                 stored = str(parsed)

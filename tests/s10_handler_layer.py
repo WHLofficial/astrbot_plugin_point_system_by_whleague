@@ -541,20 +541,17 @@ async def test_main_routes():
             "points_backup",
             "birthday_announce",
         }
-        # reschedule：先移除旧任务再重建
+        # reschedule：先移除旧任务再重建（经 delete_job 真正移除）
         obj5 = PointSystemPlugin.__new__(PointSystemPlugin)
         obj5.config_cache = base_cfg(
             backup_enabled=True, backup_time="04:00", birthday_announce_time="08:00"
         )
         obj5.context = FakeContext()
         await obj5._start_cron_jobs()
-        obj5._backup_job = types.SimpleNamespace(
-            name="points_backup", remove=lambda: obj5.context.cron_jobs.clear()
-        )
-        obj5._birthday_job = types.SimpleNamespace(
-            name="birthday_announce", remove=lambda: None
-        )
+        old_ids = {j["job_id"] for j in obj5.context.cron_jobs}
+        assert len(old_ids) == 2
         await obj5.reschedule_cron_jobs()
+        assert set(obj5.context.deleted_jobs) == old_ids, obj5.context.deleted_jobs
         assert {j["name"] for j in obj5.context.cron_jobs} == {
             "points_backup",
             "birthday_announce",
@@ -642,7 +639,7 @@ async def test_main_routes():
         obj.backup_service = _BackupRecorder()
         await obj._cron_backup()
         assert obj.backup_service.calls == 1
-        # terminate：移除 cron 任务 + 取消 sweep 任务 + 关闭 db
+        # terminate：经 delete_job 移除 cron 任务 + 取消 sweep 任务 + 关闭 db
         import asyncio as _asyncio
 
         class _SweepTask:
@@ -655,20 +652,26 @@ async def test_main_routes():
             def __await__(self):
                 return _asyncio.sleep(0).__await__()
 
-        removed = []
         sweep = _SweepTask()
         obj._cache_sweep_task = sweep
-        obj._backup_job = types.SimpleNamespace(
-            name="points_backup", remove=lambda: removed.append("backup")
-        )
+        obj.context = FakeContext()
+        obj._backup_job = types.SimpleNamespace(name="points_backup", job_id="bk")
         obj._birthday_job = types.SimpleNamespace(
-            name="birthday_announce", remove=lambda: removed.append("birthday")
+            name="birthday_announce", job_id="bd"
         )
         obj.db = types.SimpleNamespace(close=mock.AsyncMock())
         await obj.terminate()
         assert sweep.cancelled == 1, sweep.cancelled
-        assert set(removed) == {"backup", "birthday"}, removed
+        assert set(obj.context.deleted_jobs) == {"bk", "bd"}, obj.context.deleted_jobs
         assert obj.db.close.called
+        # 兼容兜底：无 job_id 的旧式任务对象回退 remove()
+        removed_fallback = []
+        obj._backup_job = types.SimpleNamespace(
+            name="points_backup", remove=lambda: removed_fallback.append("backup")
+        )
+        obj._birthday_job = None
+        await obj.terminate()
+        assert removed_fallback == ["backup"], removed_fallback
     return "main 路由：wake 跳过/兑换参数路由/兑换记录页码/cron 注册与重建/stop_event/核销委托/群消息委托/备份回调/terminate"
 
 
@@ -775,6 +778,36 @@ async def test_my_points_route():
     return "我的积分路由：严格匹配触发与委托"
 
 
+async def test_cleanup_stale_cron_jobs():
+    """存量清理只删除本插件的非持久化 basic 任务，不影响其他定时任务。"""
+    from astrbot_plugin_point_system_by_whleague.main import PointSystemPlugin
+
+    def _job(job_id, name, persistent, job_type="basic"):
+        return types.SimpleNamespace(
+            job_id=job_id, name=name, persistent=persistent, job_type=job_type
+        )
+
+    obj = PointSystemPlugin.__new__(PointSystemPlugin)
+    obj.context = FakeContext()
+    obj.context.seed_jobs = [
+        _job("s1", "points_backup", persistent=False),
+        _job("s2", "birthday_announce", persistent=False),
+        # 以下均不应被删除
+        _job("s3", "points_backup", persistent=True),  # 持久化任务
+        _job("s4", "other_plugin_job", persistent=False),  # 其他插件任务
+        _job("s5", "points_backup", persistent=False, job_type="active_agent"),
+        _job("s6", "birthday_announce", persistent=False, job_type="active_agent"),
+    ]
+    await obj._cleanup_stale_cron_jobs()
+    assert set(obj.context.deleted_jobs) == {"s1", "s2"}, obj.context.deleted_jobs
+    # 无 list_jobs（旧版 AstrBot）：静默跳过
+    obj.context.cron_manager = types.SimpleNamespace(add_basic_job=lambda *a, **k: None)
+    obj.context.deleted_jobs.clear()
+    await obj._cleanup_stale_cron_jobs()
+    assert obj.context.deleted_jobs == []
+    return "存量清理：仅删本插件非持久化 basic 任务，持久化/他插件/active_agent 不受影响"
+
+
 TESTS = [
     ("signin_handler", test_signin_handler_basic),
     ("lottery_handler", test_lottery_handler_paths),
@@ -786,4 +819,5 @@ TESTS = [
     ("main_routes", test_main_routes),
     ("my_points_handler", test_my_points_handler),
     ("my_points_route", test_my_points_route),
+    ("cleanup_stale_cron_jobs", test_cleanup_stale_cron_jobs),
 ]

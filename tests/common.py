@@ -147,11 +147,26 @@ class FakeContext:
     def __init__(self):
         self.cron_jobs = []
         self.sent = []
-        self.cron_manager = types.SimpleNamespace(add_basic_job=self._add_job)
+        self.deleted_jobs = []
+        self.seed_jobs = []
+        self.cron_manager = types.SimpleNamespace(
+            add_basic_job=self._add_job,
+            delete_job=self._delete_job,
+            list_jobs=self._list_jobs,
+        )
 
     async def _add_job(self, name, cron_expression, handler, description):
-        self.cron_jobs.append({"name": name, "cron": cron_expression})
-        return types.SimpleNamespace(name=name, remove=lambda: None)
+        job_id = f"job_{name}_{len(self.cron_jobs)}"
+        self.cron_jobs.append(
+            {"name": name, "cron": cron_expression, "job_id": job_id}
+        )
+        return types.SimpleNamespace(name=name, job_id=job_id, remove=lambda: None)
+
+    async def _delete_job(self, job_id):
+        self.deleted_jobs.append(job_id)
+
+    async def _list_jobs(self):
+        return list(self.seed_jobs)
 
     async def send_message(self, origin, chain):
         self.sent.append((origin, chain))

@@ -122,9 +122,19 @@ async def test_schema_v1_to_v3_migration():
         cols = await db.fetchall("PRAGMA table_info(redeem_records)")
         names = {c["name"] for c in cols}
         assert "rejected_at" in names and "rejected_by" in names
+        # v5：rob_records 纯新增表 + 索引
+        rob = await db.fetchone("SELECT 1 FROM sqlite_master WHERE type='table' AND name='rob_records'")
+        assert rob is not None
+        rob_cols = {c["name"] for c in await db.fetchall("PRAGMA table_info(rob_records)")}
+        assert {"qq", "target_qq", "group_id", "cost", "stolen", "success"} <= rob_cols
+        for idx in ("idx_rob_qq_date", "idx_rob_target"):
+            r = await db.fetchone(
+                "SELECT 1 FROM sqlite_master WHERE type='index' AND name=?", (idx,)
+            )
+            assert r is not None, idx
     finally:
         await db.close()
-    return "schema 迁移：v1→v4 加列/accounts 回填/users 瘦身/去重索引/数据保留"
+    return "schema 迁移：v1→v5 加列/accounts 回填/users 瘦身/去重索引/rob_records/数据保留"
 
 
 async def test_schema_migration_idempotent():

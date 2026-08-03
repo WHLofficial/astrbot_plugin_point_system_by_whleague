@@ -64,9 +64,32 @@ async def test_prune_and_clear():
     return "限流器：剪枝只删过期键、clear 清空"
 
 
+async def test_get_remaining():
+    from astrbot_plugin_point_system_by_whleague.utils.rate_limiter import RateLimiter
+
+    lim = RateLimiter()
+    # cooldown<=0 → 恒 0（不拦截）
+    assert lim.get_remaining("rob", "u1", "G1", 0) == 0
+    # 未冷却 → 0
+    assert lim.get_remaining("rob", "u1", "G1", 600) == 0
+    # 冷却中 → 剩余秒数递减
+    assert lim.check_user("rob", "u1", "G1", 600) is True
+    r1 = lim.get_remaining("rob", "u1", "G1", 600)
+    assert 0 < r1 <= 600
+    # 不同用户/动作互不影响
+    assert lim.get_remaining("rob", "u2", "G1", 600) == 0
+    assert lim.get_remaining("other", "u1", "G1", 600) == 0
+    # 手动拨慢时钟模拟过期 → 0
+    key = "rob:u1:G1"
+    lim._user_cooldowns[key] = time.time() - 700
+    assert lim.get_remaining("rob", "u1", "G1", 600) == 0
+    return "限流器：get_remaining 冷却剩余秒数"
+
+
 TESTS = [
     ("user_cooldown", test_user_cooldown_semantics),
     ("group_cooldown", test_group_cooldown_semantics),
     ("zero_cooldown", test_zero_cooldown_bypass),
     ("prune_and_clear", test_prune_and_clear),
+    ("get_remaining", test_get_remaining),
 ]

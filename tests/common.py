@@ -21,6 +21,7 @@ PLUGINS_DIR = os.path.dirname(PLUGIN_ROOT)
 if PLUGINS_DIR not in sys.path:
     sys.path.insert(0, PLUGINS_DIR)
 
+from astrbot.api.message_components import At, AtAll, Plain
 from astrbot_plugin_point_system_by_whleague.config.defaults import (
     _LIST_KEYS,
     DEFAULT_CONFIG,
@@ -64,10 +65,14 @@ class FakeEvent:
         qq: 发送者 QQ。
         group_id: 群 ID。
         is_admin: 是否为 AstrBot 全局管理员。
-        msg: 消息文本。
+        msg: 消息文本（Plain 段文本，不含 @）。
         group_owner: 群主 QQ；为 None 时 get_group() 返回 None（非群主）。
         at_wake: 是否为 @bot / 唤醒前缀命令消息。
         bot: 平台 bot 桩（默认空对象）。
+        at_targets: @ 目标 QQ 列表（生成 At 段）。
+        at_all: 是否含 @全体成员（生成 AtAll 段）。
+        at_self: 是否含 @bot 自身（生成 At 段）。
+        self_qq: get_self_id() 返回值（bot 自身 QQ）。
     """
 
     def __init__(
@@ -79,6 +84,10 @@ class FakeEvent:
         group_owner=None,
         at_wake=False,
         bot=None,
+        at_targets=None,
+        at_all=False,
+        at_self=False,
+        self_qq="bot_self_qq",
     ):
         self._qq = qq
         self._gid = group_id
@@ -91,6 +100,14 @@ class FakeEvent:
         self.bot = bot if bot is not None else object()
         self._platform = "aiocqhttp"
         self._sender_name = f"昵称{qq}"
+        self._self_qq = self_qq
+        self._components = [Plain(msg)]
+        for t in at_targets or []:
+            self._components.append(At(qq=str(t)))
+        if at_self:
+            self._components.append(At(qq=self_qq))
+        if at_all:
+            self._components.append(AtAll())
 
     def get_sender_id(self):
         return self._qq
@@ -100,6 +117,12 @@ class FakeEvent:
 
     def get_message_str(self):
         return self._msg
+
+    def get_messages(self):
+        return list(self._components)
+
+    def get_self_id(self):
+        return self._self_qq
 
     def get_platform_name(self):
         return self._platform

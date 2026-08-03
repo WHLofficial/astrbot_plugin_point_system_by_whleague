@@ -43,6 +43,30 @@ class _MessageChain:
         return f"_MessageChain({self._parts})"
 
 
+class _Plain:
+    """astrbot.api.message_components.Plain 桩（type/text 属性对齐真实组件）。"""
+
+    def __init__(self, text, convert=True, **_):
+        self.type = "Plain"
+        self.text = str(text)
+
+
+class _At:
+    """astrbot.api.message_components.At 桩（type/qq/name 属性对齐真实组件）。"""
+
+    def __init__(self, qq, name="", **_):
+        self.type = "At"
+        self.qq = qq
+        self.name = name
+
+
+class _AtAll(_At):
+    """astrbot.api.message_components.AtAll 桩（At 子类，qq="all"）。"""
+
+    def __init__(self, **kwargs):
+        super().__init__(qq="all", name=kwargs.get("name", "全体成员"))
+
+
 class _Star:
     def __init__(self, context=None):
         self.context = context
@@ -89,6 +113,12 @@ def install_stubs():
     platform_pkg = types.ModuleType("astrbot.api.platform")
     platform_pkg.MessageType = _MessageType
     sys.modules["astrbot.api.platform"] = platform_pkg
+
+    mc_pkg = types.ModuleType("astrbot.api.message_components")
+    mc_pkg.Plain = _Plain
+    mc_pkg.At = _At
+    mc_pkg.AtAll = _AtAll
+    sys.modules["astrbot.api.message_components"] = mc_pkg
 
     sys.modules["astrbot"] = astrbot_pkg
     sys.modules["astrbot.api"] = api_pkg

@@ -107,6 +107,8 @@ class RobService:
         power = cfg["rob_reward_power"]
         cap = cfg["rob_reward_cap"]
         daily_limit = cfg["rob_daily_limit"]
+        target_daily_limit = cfg["rob_target_daily_limit"]
+        decay = cfg["rob_reward_decay"]
 
         async def _tx(conn):
             # 每日限次：按 QQ 全局统计（跨群共享钱包，与抽奖口径一致）
@@ -116,6 +118,14 @@ class RobService:
                     raise RobError(
                         f"\u4eca\u65e5\u6253\u52ab\u6b21\u6570\u5df2\u8fbe\u4e0a\u9650 ({daily_limit} \u6b21)"
                     )
+
+            # 目标侧防集火：每日被劫上限（全部次数口径，含失败）+
+            # 收益衰减计数（仅成功次数），一次查询两用
+            total_hits, win_hits = await PointDAO.target_robs_today(conn, target_qq)
+            if target_daily_limit > 0 and total_hits >= target_daily_limit:
+                raise RobError(
+                    f"\u76ee\u6807\u4eca\u65e5\u5df2\u88ab\u6253\u52ab {total_hits} \u6b21\uff0c\u65e0\u6cd5\u518d\u88ab\u6253\u52ab"
+                )
 
             # 事务内重取目标余额（与扣分同源，防并发偏差）；
             # 门槛检查后目标可能被并发扣成负，max(..., 0) 防御负值幂运算
@@ -132,6 +142,10 @@ class RobService:
                     round(fixed * (target_points / base) ** power) if base > 0 else 0
                 )
                 stolen = min(cap, fixed + dynamic)
+                # 防集火收益衰减：目标每被成功打劫一次，后续收益递减
+                # （仅成功次数计数；目标每日上限关闭时衰减仍生效）
+                if decay > 0 and win_hits > 0:
+                    stolen = round(stolen * (1 - decay) ** win_hits)
                 if stolen > 0:
                     balance = await PointService.change_balance(
                         conn, qq, group_id, stolen, "rob_reward"

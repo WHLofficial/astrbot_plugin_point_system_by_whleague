@@ -71,6 +71,7 @@ _PROBABILITY_KEYS = (
     "easter_lucky_probability",
     "easter_unlucky_probability",
     "rob_success_rate",
+    "rob_reward_decay",
 )
 
 # float 配置的幂指数类校验范围（区别于 0~1 概率键）

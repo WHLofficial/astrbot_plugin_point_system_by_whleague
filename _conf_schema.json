@@ -278,6 +278,18 @@
     "type": "int",
     "default": 3
   },
+  "rob_target_daily_limit": {
+    "description": "目标每日被劫次数上限",
+    "hint": "每个目标每天最多被打劫次数（按 QQ 全局跨群统计，成功与失败均计数），0 表示不限。",
+    "type": "int",
+    "default": 6
+  },
+  "rob_reward_decay": {
+    "description": "打劫收益衰减比例",
+    "hint": "目标每被成功打劫一次，后续收益按 (1-衰减比例) 递减，0~1 之间的小数，0 表示不衰减（防集火）。",
+    "type": "float",
+    "default": 0.25
+  },
   "keyword_rob": {
     "description": "打劫关键词",
     "hint": "触发打劫的关键词列表，消息须为「关键词 @目标」形态。注意：修改关键词后需同步 main.py 中 on_rob 的粗筛正则（默认硬编码\"打劫\"），否则新词无法触发。",

@@ -448,6 +448,24 @@ class PointDAO:
         return row["cnt"] if row else 0
 
     @staticmethod
+    async def target_robs_today(conn, target_qq: str) -> tuple[int, int]:
+        """统计目标本业务日的打劫情况（必须在事务回调内用传入的 conn 调用）。
+
+        Returns:
+            (总次数, 成功次数)：总次数含失败（目标每日被劫上限用，跨群全局统计）；
+            成功次数用于收益衰减（COALESCE 保证无记录时返回 0 而非 NULL）。
+        """
+        async with conn.execute(
+            "SELECT COUNT(*) AS total, COALESCE(SUM(success), 0) AS wins "
+            "FROM rob_records WHERE target_qq=? AND created_at>=?",
+            (target_qq, period_start_str()),
+        ) as cur:
+            row = await cur.fetchone()
+        if not row:
+            return 0, 0
+        return row["total"], row["wins"]
+
+    @staticmethod
     async def insert_rob_record(
         conn,
         qq: str,

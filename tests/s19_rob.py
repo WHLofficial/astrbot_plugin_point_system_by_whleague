@@ -277,7 +277,90 @@ async def test_target_daily_limit():
             "SELECT COUNT(*) AS c FROM rob_records WHERE qq='10107'"
         )
         assert cnt["c"] == 0
+        # 固定方案拦截文案不带「今日上限」（与 v0.4.2 文案一致）
+        assert "今日上限" not in r7["msg"]
     return "防集火：目标每日被劫上限拦截、精确次数文案、拦截消耗冷却"
+
+
+async def test_target_limit_dynamic():
+    """动态方案（rob_target_limit_dynamic=true）：上限 = 基准 6 + 主动打劫 2 = 8，
+    第 9 个打劫者被拒且文案附动态上限；主动打劫全部口径（成功/失败均计数）。"""
+    async with TempDB() as t:
+        cfg = base_cfg(
+            rob_cooldown=0, rob_daily_limit=0, rob_target_limit_dynamic=True
+        )
+        _, ps, rs, lim = await _build(t, cfg)
+        await _grant(ps, "10002", "1001", 2000)  # 目标
+        await _grant(ps, "90001", "1001", 5000)  # 目标主动打劫的对象
+        await _grant(ps, "90002", "1001", 5000)
+        # 目标主动打劫 2 次（成功），主动口径 = 2
+        for dummy in ("90001", "90002"):
+            with patch_random(random=0.1):
+                r = await rs.rob("10002", dummy, "1001")
+            assert r["performed"] is True and r["success"] is True, (dummy, r)
+        # 上限 = 6 + 2 = 8：前 8 个打劫者全部放行
+        for i in range(8):
+            robber = f"1020{i + 1}"
+            await _grant(ps, robber, "1001", 1000)
+            with patch_random(random=0.1):
+                r = await rs.rob(robber, "10002", "1001")
+            assert r["performed"] is True, (i, r)
+        # 第 9 个被拒：文案附动态上限「今日上限 8」
+        await _grant(ps, "10209", "1001", 1000)
+        r9 = await rs.rob("10209", "10002", "1001")
+        assert r9["performed"] is False
+        assert "目标今日已被打劫 8 次（今日上限 8）" in r9["msg"]
+    return "防集火：动态方案上限=基准+主动打劫次数、文案附上限"
+
+
+async def test_target_limit_dynamic_base_zero_clamped():
+    """动态方案 + 基准 0（绕过配置层直配注入）：服务层 max(...,1) 防御按 1 处理（非不限）。"""
+    async with TempDB() as t:
+        cfg = base_cfg(
+            rob_cooldown=0,
+            rob_daily_limit=0,
+            rob_target_daily_limit=0,
+            rob_target_limit_dynamic=True,
+        )
+        _, ps, rs, lim = await _build(t, cfg)
+        await _grant(ps, "10211", "1001", 1000)
+        await _grant(ps, "90001", "1001", 10000)
+        with patch_random(random=0.1):
+            r1 = await rs.rob("10211", "90001", "1001")
+        assert r1["performed"] is True and r1["success"] is True
+        # 上限 = max(0,1) + 0 = 1：第 2 次打劫被拒（而非不限）
+        r2 = await rs.rob("10211", "90001", "1001")
+        assert r2["performed"] is False
+        assert "目标今日已被打劫 1 次（今日上限 1）" in r2["msg"]
+    return "防集火：动态方案基准 0 服务层按 1 钳位（非不限）"
+
+
+async def test_target_limit_dynamic_failure_counts():
+    """主动打劫失败同样计入动态上限（全部口径）：失败 1 次后上限 = 6 + 1 = 7。"""
+    async with TempDB() as t:
+        cfg = base_cfg(
+            rob_cooldown=0, rob_daily_limit=0, rob_target_limit_dynamic=True
+        )
+        _, ps, rs, lim = await _build(t, cfg)
+        await _grant(ps, "10002", "1001", 2000)  # 目标
+        await _grant(ps, "90001", "1001", 5000)
+        # 目标主动打劫失败 1 次（random=0.9 ≥ 成功率 0.35），仍计入主动口径
+        with patch_random(random=0.9):
+            r = await rs.rob("10002", "90001", "1001")
+        assert r["performed"] is True and r["success"] is False
+        # 上限 = 6 + 1 = 7：前 7 个打劫者放行
+        for i in range(7):
+            robber = f"1030{i + 1}"
+            await _grant(ps, robber, "1001", 1000)
+            with patch_random(random=0.1):
+                r = await rs.rob(robber, "10002", "1001")
+            assert r["performed"] is True, (i, r)
+        # 第 8 个被拒：文案附「今日上限 7」
+        await _grant(ps, "10308", "1001", 1000)
+        r8 = await rs.rob("10308", "10002", "1001")
+        assert r8["performed"] is False
+        assert "目标今日已被打劫 7 次（今日上限 7）" in r8["msg"]
+    return "防集火：主动打劫失败也计入动态上限（全部口径）"
 
 
 async def test_target_limit_zero_decay_still_active():
@@ -657,6 +740,9 @@ TESTS = [
     ("failure_guard_atomic", test_failure_guard_atomic_rollback),
     ("no_cooldown_when_zero", test_no_cooldown_when_zero),
     ("target_daily_limit", test_target_daily_limit),
+    ("target_limit_dynamic", test_target_limit_dynamic),
+    ("target_limit_dynamic_base_zero_clamped", test_target_limit_dynamic_base_zero_clamped),
+    ("target_limit_dynamic_failure_counts", test_target_limit_dynamic_failure_counts),
     ("target_limit_zero_decay", test_target_limit_zero_decay_still_active),
     ("decay_sequence", test_decay_sequence),
     ("decay_failure_not_counted", test_decay_failure_not_counted),

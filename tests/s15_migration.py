@@ -200,8 +200,44 @@ async def test_legacy_config_migration():
     return "legacy 配置迁移：类型转换/非法跳过/清空旧表/None 路径"
 
 
+async def test_dynamic_base_zero_coerced_on_load():
+    """WebUI/手改配置兜底：rob_target_limit_dynamic=true 且基准 0 时，加载按 1 处理并回写。"""
+    async with TempDB() as t:
+        from astrbot_plugin_point_system_by_whleague.main import PointSystemPlugin
+
+        class _FakeConfig(dict):
+            first_deploy = False
+
+            def __init__(self, **kv):
+                super().__init__(kv)
+                self.save_called = 0
+
+            def save_config(self):
+                self.save_called += 1
+
+        cfg = _FakeConfig(rob_target_limit_dynamic=True, rob_target_daily_limit=0)
+        obj = PointSystemPlugin.__new__(PointSystemPlugin)
+        obj.config = cfg
+        obj.dao = t.dao
+        cache = await obj._load_config_cache()
+        assert cache["rob_target_limit_dynamic"] is True
+        assert cache["rob_target_daily_limit"] == 1  # 0 按 1 处理
+        assert cfg["rob_target_daily_limit"] == 1  # 回写托管配置
+        assert cfg.save_called == 1
+        # 动态 false 时 0 不处理（固定方案 0=不限）
+        cfg2 = _FakeConfig(rob_target_limit_dynamic=False, rob_target_daily_limit=0)
+        obj2 = PointSystemPlugin.__new__(PointSystemPlugin)
+        obj2.config = cfg2
+        obj2.dao = t.dao
+        cache2 = await obj2._load_config_cache()
+        assert cache2["rob_target_daily_limit"] == 0
+        assert cfg2.save_called == 0
+    return "配置加载：动态方案基准 0 按 1 处理并回写、固定方案 0 保留"
+
+
 TESTS = [
     ("schema_v1_to_v3", test_schema_v1_to_v3_migration),
     ("schema_idempotent", test_schema_migration_idempotent),
     ("legacy_config_migration", test_legacy_config_migration),
+    ("dynamic_base_zero_coerced", test_dynamic_base_zero_coerced_on_load),
 ]

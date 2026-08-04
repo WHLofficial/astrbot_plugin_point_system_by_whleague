@@ -342,6 +342,48 @@ async def test_admin_set_config_webui_path():
     return "管理：/设置 WebUI 托管配置路径 save_config"
 
 
+async def test_admin_set_config_rob_dynamic_zero():
+    """动态方案下基准 0 拒绝（/设置）：设置 0 拒绝、开启动态时基准 0 拒绝；固定方案 0 仍合法。"""
+    async with TempDB() as t:
+        handler, _ = await _admin_plugin(t)
+        # 动态方案已开启：设置基准 0 被拒
+        handler._plugin.config_cache["rob_target_limit_dynamic"] = True
+        ev = FakeEvent(
+            "admin", "G1", is_admin=True, msg="/设置 rob_target_daily_limit 0"
+        )
+        msgs = await collect(handler.set_config(ev))
+        assert any("不能为 0" in m for m in msgs), msgs
+        assert handler._plugin.config_cache["rob_target_daily_limit"] == 6  # 未生效
+        # 基准 0 + 开启动态方案被拒
+        handler._plugin.config_cache["rob_target_limit_dynamic"] = False
+        handler._plugin.config_cache["rob_target_daily_limit"] = 0
+        ev = FakeEvent(
+            "admin", "G1", is_admin=True, msg="/设置 rob_target_limit_dynamic true"
+        )
+        msgs = await collect(handler.set_config(ev))
+        assert any("≥ 1" in m for m in msgs), msgs
+        assert handler._plugin.config_cache["rob_target_limit_dynamic"] is False  # 未生效
+        # 固定方案下 0 仍合法（0=不限）
+        ev = FakeEvent(
+            "admin", "G1", is_admin=True, msg="/设置 rob_target_daily_limit 0"
+        )
+        msgs = await collect(handler.set_config(ev))
+        assert any("已更新配置" in m for m in msgs), msgs
+        assert handler._plugin.config_cache["rob_target_daily_limit"] == 0
+        # 正向：基准 ≥1 + 开启动态方案放行
+        ev = FakeEvent(
+            "admin", "G1", is_admin=True, msg="/设置 rob_target_daily_limit 3"
+        )
+        await collect(handler.set_config(ev))
+        ev = FakeEvent(
+            "admin", "G1", is_admin=True, msg="/设置 rob_target_limit_dynamic true"
+        )
+        msgs = await collect(handler.set_config(ev))
+        assert any("已更新配置" in m for m in msgs), msgs
+        assert handler._plugin.config_cache["rob_target_limit_dynamic"] is True
+    return "管理：动态方案基准 0 拒绝（设置 0/开启动态两方向）、固定方案 0 仍合法"
+
+
 async def test_admin_view_config():
     async with TempDB() as t:
         handler, _ = await _admin_plugin(t)
@@ -567,6 +609,7 @@ TESTS = [
     ("admin_daily_kw_passphrase_dynamic", test_admin_daily_kw_passphrase_dynamic),
     ("admin_set_config", test_admin_set_config),
     ("admin_set_config_webui", test_admin_set_config_webui_path),
+    ("admin_set_config_rob_dynamic_zero", test_admin_set_config_rob_dynamic_zero),
     ("admin_set_config_hot_reload", test_admin_set_config_hot_reload),
     ("pending_clear_prune", test_pending_clear_prune),
     ("admin_view_config", test_admin_view_config),

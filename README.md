@@ -1,6 +1,6 @@
 # 积分系统插件 by WHLeague
 
-> 一个功能完整的群聊积分系统，支持签到、抽奖、兑换、排行、生日、口令、打劫等多项功能。当前版本 **v0.4.2**。
+> 一个功能完整的群聊积分系统，支持签到、抽奖、兑换、排行、生日、口令、打劫等多项功能。当前版本 **v0.4.3**。
 
 ## 功能列表
 
@@ -191,7 +191,8 @@ whl抽奖
 | rob_target_min_points | int | 50 | 目标积分门槛 |
 | rob_cooldown | int | 600 | 同用户打劫冷却（秒，0=不限，成功/失败均进入） |
 | rob_daily_limit | int | 3 | 每日打劫次数上限（按 QQ 全局统计，0=不限） |
-| rob_target_daily_limit | int | 6 | 目标每日被劫次数上限（按 QQ 全局跨群统计，成功与失败均计数，0=不限） |
+| rob_target_daily_limit | int | 6 | 目标每日被劫次数上限（按 QQ 全局跨群统计，成功与失败均计数，固定方案下 0=不限；动态方案开启时作为固定基准值，不能为 0，最小 1：WebUI 输入 0 按 1 处理，/设置 拒绝 0） |
+| rob_target_limit_dynamic | bool | false | 目标被劫上限动态方案开关（true：上限 = rob_target_daily_limit + 该人今日主动发起打劫次数，成功与失败均计数；开启需 rob_target_daily_limit ≥ 1） |
 | rob_reward_decay | float | 0.25 | 打劫收益衰减比例（目标每被成功打劫一次，后续收益递减，0~1，0=不衰减） |
 | **负分** | | | |
 | negative_disable_lottery | bool | true | 负分禁止抽奖 |

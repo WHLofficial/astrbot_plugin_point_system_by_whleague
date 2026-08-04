@@ -45,7 +45,7 @@
 | 18 | **反馈增强（v0.2.2）** | 签到反馈含当日排名/连签/当前积分；抽奖反馈含消耗/积分变化/当前积分；兑换反馈含订单号/剩余库存/积分余额/核销提示；`/查生日` 显示群昵称 |
 | 19 | **我的积分（v0.3.0）** | 无前缀关键词「我的积分 / 积分查询」，展示群昵称+QQ / 当前积分 / 累计签到 / 连签 / 今日签到 / 本群排名 / 最近 5 条本群流水 |
 | 20 | **打劫（v0.4.0）** | 无前缀「打劫 @目标」（At 段解析，排除 AtAll 与 bot 自身），成功抢得目标部分积分（凸曲线收益公式），失败扣成本；同用户冷却 + 每日上限防刷；目标可被抢成负分并联动负分头衔 |
-| 21 | **打劫防集火（v0.4.2）** | 目标每日被劫上限（全部次数口径，按 QQ 全局）+ 收益衰减（每被成功打劫一次后续收益递减），防止高积分玩家被集火掠夺 |
+| 21 | **打劫防集火（v0.4.2，v0.4.3 增动态方案）** | 目标每日被劫上限（全部次数口径，按 QQ 全局）+ 收益衰减（每被成功打劫一次后续收益递减），防止高积分玩家被集火掠夺；`rob_target_limit_dynamic=true` 时上限 = 基准（最小 1）+ 该人主动发起打劫次数 |
 
 ---
 
@@ -404,7 +404,8 @@ CREATE INDEX IF NOT EXISTS idx_rob_target ON rob_records(target_qq);
 | rob_target_min_points | int | 50 | 目标积分门槛 |
 | rob_cooldown | int | 600 | 同用户打劫冷却秒数（0=不限，成功/失败均进入） |
 | rob_daily_limit | int | 3 | 每日打劫次数上限（按 QQ 全局统计，0=不限） |
-| rob_target_daily_limit | int | 6 | 目标每日被劫次数上限（按 target_qq 全局跨群统计，成功与失败均计数，0=不限） |
+| rob_target_daily_limit | int | 6 | 目标每日被劫次数上限（按 target_qq 全局跨群统计，成功与失败均计数，固定方案下 0=不限；动态方案开启时作为固定基准值，不能为 0，最小 1：WebUI 输入 0 按 1 处理，/设置 拒绝 0） |
+| rob_target_limit_dynamic | bool | false | 目标被劫上限动态方案开关（true：上限 = rob_target_daily_limit + 该人今日主动发起打劫次数，成功与失败均计数；开启需 rob_target_daily_limit ≥ 1） |
 | rob_reward_decay | float | 0.25 | 打劫收益衰减比例：目标每被**成功**打劫一次，后续收益 ×(1-decay)^n（0~1，0=不衰减；目标上限关闭时仍生效） |
 | keyword_rob | json | ["打劫"] | 打劫触发关键词（注意：修改后需同步 main.py 的 on_rob 粗筛正则） |
 | **负分** | | | |
@@ -964,8 +965,14 @@ rob(qq, target_qq, group_id, bot=None):
   #    a. 打劫者每日次数：COUNT rob_records WHERE qq AND created_at >= period_start_str()
   #       （按 QQ 全局统计，与抽奖口径一致）
   #    b. 目标防集火：target_robs_today(conn, target_qq) → (总次数, 成功次数)（一次查询）
-  #       - 上限：总次数（全部次数口径，含失败）>= rob_target_daily_limit 时拒绝
-  #         （"目标今日已被打劫 X 次，无法再被打劫"，事务回滚，冷却已消耗）
+  #       - 上限：固定方案 limit = rob_target_daily_limit（0=不限）；动态方案
+  #         （rob_target_limit_dynamic=true）limit = max(rob_target_daily_limit, 1) +
+  #         count_robs_today(conn, target_qq)（该人主动发起打劫次数，全部口径，复用打劫者限次统计）
+  #         ——动态方案基准最小 1：/设置 拒绝 0（handler 交叉校验）、WebUI/手改配置 0 在
+  #         _load_config_cache 加载时按 1 处理并回写，服务层 max(...,1) 防御兜底
+  #       - 总次数（全部次数口径，含失败）>= limit 时拒绝
+  #         （"目标今日已被打劫 X 次，无法再被打劫"，动态方案附"（今日上限 Y）"，
+  #         事务回滚，冷却已消耗）
   #       - 衰减：成功次数 win_hits（仅成功口径）用于收益递减
   #    c. SELECT 目标余额（事务内，max(负,0) 防御并发扣负；与扣分同源防偏差）
   #    d. success = random() < rob_success_rate

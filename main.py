@@ -178,6 +178,20 @@ class PointSystemPlugin(Star):
                 self.config.save_config()
                 logger.info("Migrated legacy DB config into plugin config file.")
             await self.dao.clear_config()
+
+        # 动态方案基准最小 1：WebUI 输入 0 按 1 处理并回写持久化
+        # （/设置 路径已在 handler 拒绝，此处兜底 WebUI/手改配置）
+        if (
+            cache.get("rob_target_limit_dynamic")
+            and cache.get("rob_target_daily_limit", 0) < 1
+        ):
+            logger.warning(
+                "rob_target_limit_dynamic=true 时 rob_target_daily_limit 不能为 0，按 1 处理"
+            )
+            cache["rob_target_daily_limit"] = 1
+            if self.config is not None:
+                self.config["rob_target_daily_limit"] = 1
+                self.config.save_config()
         return cache
 
     @staticmethod

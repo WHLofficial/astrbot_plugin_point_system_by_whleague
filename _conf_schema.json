@@ -280,9 +280,15 @@
   },
   "rob_target_daily_limit": {
     "description": "目标每日被劫次数上限",
-    "hint": "每个目标每天最多被打劫次数（按 QQ 全局跨群统计，成功与失败均计数），0 表示不限。",
+    "hint": "每个目标每天最多被打劫次数（按 QQ 全局跨群统计，成功与失败均计数），固定方案下 0 表示不限；动态方案开启时该值作为固定基准值且不能为 0（最小 1，WebUI 输入 0 按 1 处理，/设置 拒绝 0）。",
     "type": "int",
     "default": 6
+  },
+  "rob_target_limit_dynamic": {
+    "description": "目标被劫上限动态方案开关",
+    "hint": "关闭（默认）：目标每日被劫上限为固定值 rob_target_daily_limit；开启：上限 = rob_target_daily_limit + 该人今日主动发起打劫次数（成功与失败均计数），参与打劫者暴露更多被劫窗口。开启前请确保 rob_target_daily_limit ≥ 1。",
+    "type": "bool",
+    "default": false
   },
   "rob_reward_decay": {
     "description": "打劫收益衰减比例",

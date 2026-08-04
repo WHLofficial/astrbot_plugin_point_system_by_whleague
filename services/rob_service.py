@@ -6,6 +6,9 @@
 - 收益：stolen = min(rob_reward_cap, rob_reward_fixed + dynamic)，
   dynamic = round(rob_reward_fixed * (target_points / rob_reward_base_points) ** rob_reward_power)
 - 防刷：同用户冷却（成功/失败均进入）+ 每日上限（按 QQ 全局）
+- 目标防集火：rob_target_limit_dynamic=false（默认）固定上限 rob_target_daily_limit（0=不限）；
+  =true 时上限 = rob_target_daily_limit（基准，最小 1）+ 该人今日主动发起打劫次数
+  （全部口径，成功与失败均计数）；动态方案基准 0 由配置层拒绝/WebUI 按 1 处理，此处防御兜底
 - 原子性：每日限次统计、目标余额读取、收益计算、扣分、记录写入同一事务
 """
 
@@ -108,6 +111,7 @@ class RobService:
         cap = cfg["rob_reward_cap"]
         daily_limit = cfg["rob_daily_limit"]
         target_daily_limit = cfg["rob_target_daily_limit"]
+        target_limit_dynamic = cfg["rob_target_limit_dynamic"]
         decay = cfg["rob_reward_decay"]
 
         async def _tx(conn):
@@ -122,10 +126,21 @@ class RobService:
             # 目标侧防集火：每日被劫上限（全部次数口径，含失败）+
             # 收益衰减计数（仅成功次数），一次查询两用
             total_hits, win_hits = await PointDAO.target_robs_today(conn, target_qq)
-            if target_daily_limit > 0 and total_hits >= target_daily_limit:
-                raise RobError(
-                    f"\u76ee\u6807\u4eca\u65e5\u5df2\u88ab\u6253\u52ab {total_hits} \u6b21\uff0c\u65e0\u6cd5\u518d\u88ab\u6253\u52ab"
-                )
+            if target_limit_dynamic:
+                # 动态方案：上限 = 固定基准值 rob_target_daily_limit（配置层保证 ≥1，
+                # max(...,1) 防御兜底）+ 目标今日主动发起打劫次数（全部口径，复用打劫者限次统计）
+                own_robs = await PointDAO.count_robs_today(conn, target_qq)
+                limit = max(target_daily_limit, 1) + own_robs
+                if total_hits >= limit:
+                    raise RobError(
+                        f"\u76ee\u6807\u4eca\u65e5\u5df2\u88ab\u6253\u52ab {total_hits} \u6b21"
+                        f"\uff08\u4eca\u65e5\u4e0a\u9650 {limit}\uff09\uff0c\u65e0\u6cd5\u518d\u88ab\u6253\u52ab"
+                    )
+            elif target_daily_limit > 0:
+                if total_hits >= target_daily_limit:
+                    raise RobError(
+                        f"\u76ee\u6807\u4eca\u65e5\u5df2\u88ab\u6253\u52ab {total_hits} \u6b21\uff0c\u65e0\u6cd5\u518d\u88ab\u6253\u52ab"
+                    )
 
             # 事务内重取目标余额（与扣分同源，防并发偏差）；
             # 门槛检查后目标可能被并发扣成负，max(..., 0) 防御负值幂运算

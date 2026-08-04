@@ -393,6 +393,24 @@ class AdminHandler:
             parsed = validate_and_cast(key, value)
             new_cache = dict(self._plugin.config_cache)
             new_cache[key] = parsed
+            if (
+                key == "rob_target_daily_limit"
+                and parsed == 0
+                and new_cache["rob_target_limit_dynamic"]
+            ):
+                yield event.plain_result(
+                    "动态方案下 rob_target_daily_limit 不能为 0（最小 1）"
+                )
+                return
+            if (
+                key == "rob_target_limit_dynamic"
+                and parsed
+                and new_cache["rob_target_daily_limit"] == 0
+            ):
+                yield event.plain_result(
+                    "开启动态方案前请先设置 rob_target_daily_limit ≥ 1（当前为 0）"
+                )
+                return
             if key == "signin_random_min" and parsed > new_cache["signin_random_max"]:
                 yield event.plain_result("signin_random_min 不能大于 signin_random_max")
                 return

@@ -80,7 +80,8 @@ def _passthrough(*a, **k):
 
 
 class _MessageType(enum.Enum):
-    GROUP_MESSAGE = "group_message"
+    GROUP_MESSAGE = "GroupMessage"
+    FRIEND_MESSAGE = "FriendMessage"
 
 
 def install_stubs():

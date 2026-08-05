@@ -274,6 +274,8 @@ async def test_redeem_handler_records():
             dao=t.dao,
             point_service=ps,
             redeem_service=RedeemService(t.db, t.dao, ps),
+            config_cache=base_cfg(),
+            context=FakeContext(),
         )
         handler = RedeemHandler(plugin)
         item_id = await t.dao.add_item("商品", 10, 5)
@@ -322,11 +324,81 @@ async def test_redeem_handler_records():
         assert rec["verified_by"] == "admin"
         assert ev.sent and "R20260101-0001" in str(ev.sent[0])
         assert "已通过核销" in str(ev.sent[0])
-        # 跨群核销拒绝
+        # 跨群核销拒绝（本群群管无权处理其他群记录）
         msgs = await collect(
             handler.verify_record(ev, "R20260101-0002", "verified", "")
         )
         assert any("无权处理其他群" in m for m in msgs)
+        # 全局管理员跨群核销：通知发往原兑换群 G2
+        ev_root = FakeEvent("root", "G1", is_admin=True, msg="/核销 R20260101-0002")
+        msgs = await collect(
+            handler.verify_record(ev_root, "R20260101-0002", "verified", "")
+        )
+        assert any("已核销" in m for m in msgs)
+        assert plugin.context.sent, "跨群通知应通过 context 发送"
+        origin, chain = plugin.context.sent[-1]
+        assert origin == "aiocqhttp:GroupMessage:G2", origin
+        assert "已通过核销" in str(chain)
+        rec = await t.dao.get_redeem_record("R20260101-0002")
+        assert rec["status"] == "verified" and rec["verified_by"] == "root"
+        # 私信渠道：同群核销 → context 发送私信，纯文本无 @
+        await t.db.execute(
+            "INSERT INTO redeem_records (record_no, qq, group_id, item_id, item_name, item_cost, quantity) "
+            "VALUES ('R20260101-0003','u1','G1',?,'物品3',10,1)",
+            (item_id,),
+        )
+        plugin.config_cache["redeem_notify_channel"] = "private"
+        ev_pri = FakeEvent("admin", "G1", is_admin=False, msg="/核销 R20260101-0003")
+        msgs = await collect(
+            handler.verify_record(ev_pri, "R20260101-0003", "verified", "")
+        )
+        assert any("已核销" in m for m in msgs)
+        assert ev_pri.sent == [], ev_pri.sent  # 私信渠道不走当前会话
+        origin, chain = plugin.context.sent[-1]
+        assert origin == "aiocqhttp:FriendMessage:u1", origin
+        assert "已通过核销" in str(chain) and "u1" not in str(chain)
+        plugin.config_cache["redeem_notify_channel"] = "group"
+        # 跨群核销但插件无 context：通知失败 → 当前会话警告兜底
+        plugin_nc = types.SimpleNamespace(
+            dao=t.dao,
+            point_service=ps,
+            redeem_service=RedeemService(t.db, t.dao, ps),
+            config_cache=base_cfg(),
+        )
+        handler_nc = RedeemHandler(plugin_nc)
+        await t.db.execute(
+            "INSERT INTO redeem_records (record_no, qq, group_id, item_id, item_name, item_cost, quantity) "
+            "VALUES ('R20260101-0004','u3','G2',?,'物品4',10,1)",
+            (item_id,),
+        )
+        ev_nc = FakeEvent("root", "G1", is_admin=True, msg="/核销 R20260101-0004")
+        msgs = await collect(
+            handler_nc.verify_record(ev_nc, "R20260101-0004", "verified", "")
+        )
+        assert any("已核销" in m for m in msgs)
+        assert ev_nc.sent and "通知兑换者失败" in str(ev_nc.sent[-1])
+        # 表级全局管理员（admins 表 group_id 为空）：可跨群核销 + 详情视图跨群口径一致
+        await t.dao.add_admin("gadmin2", "owner", None)
+        await t.db.execute(
+            "INSERT INTO redeem_records (record_no, qq, group_id, item_id, item_name, item_cost, quantity) "
+            "VALUES ('R20260101-0005','u4','G2',?,'物品5',10,1)",
+            (item_id,),
+        )
+        ev_g = FakeEvent("gadmin2", "G1", is_admin=False, msg="/核销 R20260101-0005")
+        msgs = await collect(
+            handler.verify_record(ev_g, "R20260101-0005", "verified", "")
+        )
+        assert any("已核销" in m for m in msgs)
+        msgs = await collect(
+            handler.list_records(FakeEvent("gadmin2", "G1", is_admin=False), "R20260101-0005", "1")
+        )
+        assert any("R20260101-0005" in m for m in msgs)
+        assert not any("其他群" in m for m in msgs), msgs
+        # 本群群管查看其他群详情仍被拒（口径一致回归）
+        msgs = await collect(
+            handler.list_records(FakeEvent("admin", "G1", is_admin=False), "R20260101-0005", "1")
+        )
+        assert any("其他群" in m for m in msgs)
         # 驳回：退分 + 恢复库存 + 原因入通知括号
         msgs = await collect(
             handler.verify_record(ev, "R20260101-0001", "rejected", "无货")
@@ -365,7 +437,7 @@ async def test_redeem_handler_records():
         assert any("已驳回" in m for m in msgs)
         assert ev3.send.called
         assert "通知兑换者失败" in str(ev3.send.call_args_list[-1][0][0])
-    return "兑换记录：详情/不存在/成员拒绝/群管核销+备注/驳回/通知/幂等/跨群拒绝"
+    return "兑换记录：详情/不存在/成员拒绝/群管核销+备注/驳回/通知/幂等/跨群权限/私信渠道/无context兜底"
 
 
 async def test_transactions_command():

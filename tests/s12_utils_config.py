@@ -314,7 +314,20 @@ async def test_lottery_tiers_fallback_and_limits():
             pass
     # 新配置键已进入 DEFAULT_CONFIG（schema 同步）
     assert "backup_keep_count" in DEFAULT_CONFIG
-    return "lottery_tiers：非法回退/合法保持；整数上限：拒绝/边界通过/默认兼容"
+    # redeem_notify_channel：枚举归一化与非法值拒绝
+    assert validate_and_cast("redeem_notify_channel", "group") == "group"
+    assert validate_and_cast("redeem_notify_channel", "群") == "group"
+    assert validate_and_cast("redeem_notify_channel", "private") == "private"
+    assert validate_and_cast("redeem_notify_channel", "私信") == "private"
+    assert validate_and_cast("redeem_notify_channel", "私聊") == "private"
+    for bad in ("email", "", "群聊", "  "):
+        try:
+            validate_and_cast("redeem_notify_channel", bad)
+            raise AssertionError(bad)
+        except ValueError:
+            pass
+    assert DEFAULT_CONFIG["redeem_notify_channel"] == "group"
+    return "lottery_tiers：非法回退/合法保持；整数上限：拒绝/边界通过/默认兼容；通知渠道枚举"
 
 
 async def test_lottery_draw_bad_tiers_runtime():

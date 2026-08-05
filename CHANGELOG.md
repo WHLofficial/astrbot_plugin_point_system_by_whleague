@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.5.2 (2026-08-05)
+
+### 修复
+
+- **主动发送 origin 首段改用机器人名称**（平台适配器实例 id，即事件会话 `platform_name`）：核销跨群/私信通知与生日 cron 播报此前用平台类型名（如 `aiocqhttp`）构造 `context.send_message` 的 session，与 `platform.meta().id` 匹配条件不符，导致消息静默发不出去。修复后核销通知优先取 `event.get_platform_id()`（回退 `unified_msg_origin` 首段）；生日报播遍历平台实例逐个尝试
+- **生日报播仅在发送成功时才标记已播报**：此前忽略 `send_message` 返回值，平台未匹配时也照常标记，失败无法重试
+
+### 测试
+
+- `FakeEvent` 新增 `platform_id`/`get_platform_id`/`unified_msg_origin`（与生产对齐）；核销通知 origin 断言改为机器人名称，新增机器人名称缺失时回退 `unified_msg_origin` 首段用例
+- 生日报播新增多实例发送失败 / 实例缺失 → 不标记已播报、可重试用例
+
 ## v0.5.1 (2026-08-05)
 
 ### 变更

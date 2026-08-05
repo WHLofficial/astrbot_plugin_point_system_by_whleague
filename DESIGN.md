@@ -859,9 +859,10 @@ async def set_record_status(record_no, action, admin_qq, group_id, note):
 通过通知：`✅ 你的兑换订单 {no}（{item} x{qty}）已通过核销（备注：{备注}）`；管理员确认消息回显备注。
 
 通知渠道（v0.5.0）：按配置 `redeem_notify_channel` 分派——
-- `group`（默认）：同群走 `event.send`（@ 兑换者）；跨群经 `context.send_message(f"{platform}:GroupMessage:{record.group_id}")` 主动发送（仅全局管理员可跨群核销，`_is_global_admin` = AstrBot 全局管理员或 admins 表 `group_id` 为空）
-- `private`：`context.send_message(f"{platform}:FriendMessage:{record.qq}")` 纯文本私信（无 @）
-- platform 取 `dao.get_account(qq)` 记录，缺失回退 `event.get_platform_name()`；`context` 缺失或发送异常 → 当前会话发警告兜底
+- `group`（默认）：同群走 `event.send`（@ 兑换者）；跨群经 `context.send_message(f"{bot}:GroupMessage:{record.group_id}")` 主动发送（仅全局管理员可跨群核销，`_is_global_admin` = AstrBot 全局管理员或 admins 表 `group_id` 为空）
+- `private`：`context.send_message(f"{bot}:FriendMessage:{record.qq}")` 纯文本私信（无 @）
+- origin 首段 = **机器人名称（平台实例 id）**（v0.5.2 修复）：`context.send_message` 仅当 session 首段 == `platform.meta().id` 才找到平台实例，平台类型名（如 `aiocqhttp`）无法匹配；`_bot_name(event)` 优先取 `event.get_platform_id()`，回退 `unified_msg_origin` 首段，最后兜底 `get_platform_name()`
+- `context` 缺失或发送异常 → 当前会话发警告兜底
 
 ### 7.10 兑换折扣
 

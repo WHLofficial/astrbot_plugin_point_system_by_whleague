@@ -548,9 +548,9 @@ async def test_main_routes():
         assert msgs == ["签到了"] and len(obj.sign_in_handler.calls) == 1
         # cmd_redeem 参数路由
         obj.redeem_handler = _RedeemHandler()
-        await collect(obj.cmd_redeem(FakeEvent("u1", "G1", msg="/兑换")))
-        await collect(obj.cmd_redeem(FakeEvent("u1", "G1", msg="/兑换 1")))
-        await collect(obj.cmd_redeem(FakeEvent("u1", "G1", msg="/兑换 1 2")))
+        await collect(obj.cmd_redeem(FakeEvent("u1", "G1", msg="/兑换商品")))
+        await collect(obj.cmd_redeem(FakeEvent("u1", "G1", msg="/兑换商品 1")))
+        await collect(obj.cmd_redeem(FakeEvent("u1", "G1", msg="/兑换商品 1 2")))
         assert obj.redeem_handler.calls == [
             "list",
             ("redeem", "1", "1"),

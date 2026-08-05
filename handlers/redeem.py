@@ -190,14 +190,15 @@ class RedeemHandler:
             # 状态变更成功：按配置渠道通知兑换者；发送失败时向当前会话发警告
             cost = record["item_cost"]
             if result["status"] == "verified":
+                note_text = f"\uff08\u5907\u6ce8\uff1a{note}\uff09" if note else ""
                 notify = (
                     f"\u2705 \u4f60\u7684\u5151\u6362\u8ba2\u5355 {record_no}"
                     f"\uff08{record['item_name']} x{record['quantity']}\uff09"
-                    f"\u5df2\u901a\u8fc7\u6838\u9500{note}"
+                    f"\u5df2\u901a\u8fc7\u6838\u9500{note_text}"
                 )
                 warn = f"\u26a0\ufe0f \u8ba2\u5355 {record_no} \u5df2\u901a\u8fc7\u6838\u9500\uff0c\u4f46\u901a\u77e5\u5151\u6362\u8005\u5931\u8d25\uff08\u65e0\u6cd5\u9001\u8fbe\u539f\u5151\u6362\u7fa4/\u79c1\u4fe1\uff09\uff0c\u8bf7\u7ebf\u4e0b\u8054\u7cfb"
             else:
-                reason = f"\uff08\u7ba1\u7406\u5458\u9a73\u56de\uff1a{note}\uff09" if note else "\uff08\u7ba1\u7406\u5458\u9a73\u56de\uff09"
+                reason = f"\uff08\u7406\u7531\uff1a{note}\uff09" if note else "\uff08\u7ba1\u7406\u5458\u9a73\u56de\uff09"
                 notify = (
                     f"\u274c \u4f60\u7684\u5151\u6362\u8ba2\u5355 {record_no}"
                     f"\uff08{record['item_name']} x{record['quantity']}\uff09"

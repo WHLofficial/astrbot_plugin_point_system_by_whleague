@@ -342,28 +342,49 @@ class PointSystemPlugin(Star):
                 result = await self.birthday_service.announce_birthdays(gid)
                 if result.get("announced"):
                     users = result["users"]
-                    platform = "aiocqhttp"
-                    account = await self.dao.get_account(users[0])
-                    if account and account["platform"]:
-                        platform = account["platform"]
-                    origin = f"{platform}:{MessageType.GROUP_MESSAGE.value}:{gid}"
-                    try:
-                        chain = MessageChain().message(
-                            "\U0001f382 \u751f\u65e5\u795d\u798f\uff01\u4eca\u5929\u8fc7\u751f\u65e5\u7684\u670b\u53cb\u6709\uff1a"
-                        )
-                        for u in users:
-                            chain.at(str(u), u)
-                        chain.message(
-                            "\n\u795d\u5927\u5bb6\u751f\u65e5\u5feb\u4e50\uff01"
-                        )
-                        await self.context.send_message(origin, chain)
+                    chain = MessageChain().message(
+                        "\U0001f382 \u751f\u65e5\u795d\u798f\uff01\u4eca\u5929\u8fc7\u751f\u65e5\u7684\u670b\u53cb\u6709\uff1a"
+                    )
+                    for u in users:
+                        chain.at(str(u), u)
+                    chain.message(
+                        "\n\u795d\u5927\u5bb6\u751f\u65e5\u5feb\u4e50\uff01"
+                    )
+                    if await self._send_birthday_announce(gid, chain):
                         await self.dao.mark_birthday_announced(
                             gid, today, json.dumps(users)
                         )
-                    except Exception as e:
-                        logger.warning(f"Failed to send birthday msg to {gid}: {e}")
+                    else:
+                        logger.warning(
+                            f"Failed to send birthday msg to {gid}: no matching platform instance"
+                        )
             except Exception as e:
                 logger.error(f"Birthday announce error for group {gid}: {e}")
+
+    async def _send_birthday_announce(self, group_id: str, chain) -> bool:
+        """生日报播主动发送：遍历平台实例取机器人名称（实例 id）构造 origin，首个成功即返回。
+
+        context.send_message 仅当 session 首段 == platform.meta().id 时才找到平台实例，
+        平台类型名（如 aiocqhttp）无法匹配，此前会导致播报静默失败。
+        """
+        platform_manager = getattr(
+            getattr(self.context, "platform_manager", None), "platform_insts", None
+        )
+        if not platform_manager:
+            return False
+        for inst in platform_manager:
+            pid = getattr(inst.meta(), "id", None)
+            if not pid:
+                continue
+            origin = f"{pid}:{MessageType.GROUP_MESSAGE.value}:{group_id}"
+            try:
+                if await self.context.send_message(origin, chain):
+                    return True
+            except Exception as e:
+                logger.warning(
+                    f"Birthday send to {group_id} via {pid} failed: {e}"
+                )
+        return False
 
     # ═══════════════════════════════════════════════════════════
     # Handlers: Sign-in

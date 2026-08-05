@@ -256,7 +256,7 @@ class RedeemHandler:
         if context is None:
             raise RuntimeError("plugin context unavailable")
         origin = (
-            f"{await self._platform(event, record)}:"
+            f"{self._bot_name(event)}:"
             f"{MessageType.GROUP_MESSAGE.value}:{record['group_id']}"
         )
         await context.send_message(origin, chain)
@@ -266,20 +266,31 @@ class RedeemHandler:
         if context is None:
             raise RuntimeError("plugin context unavailable")
         origin = (
-            f"{await self._platform(event, record)}:"
+            f"{self._bot_name(event)}:"
             f"{MessageType.FRIEND_MESSAGE.value}:{target_qq}"
         )
         await context.send_message(origin, MessageChain().message(notify))
 
-    async def _platform(self, event, record) -> str:
-        """兑换者账号记录的平台，缺失时回退当前会话平台。"""
-        try:
-            account = await self._plugin.dao.get_account(record["qq"])
-            if account and account["platform"]:
-                return account["platform"]
-        except Exception:
-            pass
-        return getattr(event, "get_platform_name", lambda: "aiocqhttp")()
+    def _bot_name(self, event) -> str:
+        """机器人名称 = 平台适配器实例 id（session 首段，context.send_message 匹配依据）。
+
+        AstrBot 中事件会话的 platform_name 即 platform_meta.id（机器人名称），
+        context.send_message 仅当 session 首段 == platform.meta().id 时才找到平台实例。
+        优先取当前事件的实例 id；缺失时回退事件 unified_msg_origin 首段，最后兜底平台类型名。
+        """
+        get_platform_id = getattr(event, "get_platform_id", None)
+        if callable(get_platform_id):
+            try:
+                pid = get_platform_id()
+                if pid:
+                    return str(pid)
+            except Exception:
+                pass
+        umo = getattr(event, "unified_msg_origin", "") or ""
+        first = umo.split(":", 1)[0]
+        if first:
+            return first
+        return getattr(event, "get_platform_name", lambda: "")() or ""
 
     async def _check_admin(self, event) -> bool:
         if event.is_admin():

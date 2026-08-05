@@ -324,6 +324,7 @@ async def test_redeem_handler_records():
         assert rec["verified_by"] == "admin"
         assert ev.sent and "R20260101-0001" in str(ev.sent[0])
         assert "已通过核销" in str(ev.sent[0])
+        assert "（备注：已发货）" in str(ev.sent[0])
         # 跨群核销拒绝（本群群管无权处理其他群记录）
         msgs = await collect(
             handler.verify_record(ev, "R20260101-0002", "verified", "")
@@ -407,7 +408,7 @@ async def test_redeem_handler_records():
         rec = await t.dao.get_redeem_record("R20260101-0001")
         assert rec["status"] == "rejected" and rec["admin_note"] == "无货"
         assert rec["rejected_by"] == "admin"
-        assert "已被驳回" in str(ev.sent[-1]) and "（管理员驳回：无货）" in str(ev.sent[-1])
+        assert "已被驳回" in str(ev.sent[-1]) and "（理由：无货）" in str(ev.sent[-1])
         acct = await t.dao.get_account("u1")
         assert acct["points"] == 10  # 退回消耗的 10 积分
         row = await t.db.fetchone("SELECT stock FROM redeem_items WHERE id=?", (item_id,))

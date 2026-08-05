@@ -195,9 +195,15 @@ async def test_birthday_cron_announce_idempotent():
         class _Ctx:
             def __init__(self):
                 self.sent = []
+                self.platform_manager = types.SimpleNamespace(
+                    platform_insts=[
+                        types.SimpleNamespace(meta=lambda: types.SimpleNamespace(id="bot1")),
+                    ]
+                )
 
             async def send_message(self, origin, chain):
                 self.sent.append((origin, str(chain)))
+                return True
 
         ctx = _Ctx()
         obj.context = ctx
@@ -206,7 +212,7 @@ async def test_birthday_cron_announce_idempotent():
         await obj._cron_birthday_announce()
         assert len(ctx.sent) == 1
         origin, text = ctx.sent[0]
-        assert "aiocqhttp" in origin and "G1" in origin
+        assert origin.startswith("bot1:") and "G1" in origin, origin
         assert "a" in text and "b" in text and "生日快乐" in text
         row = await t.db.fetchone(
             "SELECT announced_qqs FROM birthday_announce_log WHERE group_id='G1'"
@@ -218,10 +224,60 @@ async def test_birthday_cron_announce_idempotent():
     return "生日报播 cron：发送+标记+幂等"
 
 
+async def test_birthday_cron_announce_fail_no_mark():
+    """全部平台实例发送失败（或实例缺失）→ 不标记已播报，下次可重试。"""
+    async with TempDB() as t:
+        from astrbot_plugin_point_system_by_whleague.main import PointSystemPlugin
+        from astrbot_plugin_point_system_by_whleague.services.birthday_service import (
+            BirthdayService,
+        )
+        from astrbot_plugin_point_system_by_whleague.utils.helpers import today_mmdd
+
+        await t.db.execute(
+            "INSERT INTO accounts (qq, birthday, platform) VALUES ('a',?,'aiocqhttp')",
+            (today_mmdd(),),
+        )
+        await t.db.execute(
+            "INSERT INTO users (qq, group_id) VALUES ('a','G1')"
+        )
+        obj = PointSystemPlugin.__new__(PointSystemPlugin)
+
+        class _CtxFail:
+            def __init__(self):
+                self.calls = []
+                self.platform_manager = types.SimpleNamespace(
+                    platform_insts=[
+                        types.SimpleNamespace(meta=lambda: types.SimpleNamespace(id="bot1")),
+                        types.SimpleNamespace(meta=lambda: types.SimpleNamespace(id="bot2")),
+                    ]
+                )
+
+            async def send_message(self, origin, chain):
+                self.calls.append(origin)
+                raise RuntimeError("send failed")
+
+        ctx_fail = _CtxFail()
+        obj.context = ctx_fail
+        obj.dao = t.dao
+        obj.birthday_service = BirthdayService(t.dao)
+        await obj._cron_birthday_announce()
+        assert ctx_fail.calls == ["bot1:GroupMessage:G1", "bot2:GroupMessage:G1"], ctx_fail.calls
+        row = await t.db.fetchone(
+            "SELECT announced_qqs FROM birthday_announce_log WHERE group_id='G1'"
+        )
+        assert row is None, "发送失败不应标记已播报"
+        # 平台管理器缺失：不发送、不标记
+        obj.context = types.SimpleNamespace()
+        await obj._cron_birthday_announce()
+        assert len(ctx_fail.calls) == 2
+    return "生日报播 cron：全部实例失败/实例缺失不标记、可重试"
+
+
 TESTS = [
     ("birthday_set_query", test_birthday_set_and_query),
     ("birthday_invalid_inputs", test_birthday_invalid_inputs),
     ("birthday_announce_service", test_birthday_announce_service),
     ("birthday_signin_bonus", test_birthday_signin_bonus_and_year_dedup),
     ("birthday_cron_announce", test_birthday_cron_announce_idempotent),
+    ("birthday_cron_announce_fail", test_birthday_cron_announce_fail_no_mark),
 ]

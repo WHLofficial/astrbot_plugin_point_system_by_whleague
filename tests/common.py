@@ -88,6 +88,7 @@ class FakeEvent:
         at_all=False,
         at_self=False,
         self_qq="bot_self_qq",
+        platform_id="bot1",
     ):
         self._qq = qq
         self._gid = group_id
@@ -99,6 +100,7 @@ class FakeEvent:
         self.sent = []
         self.bot = bot if bot is not None else object()
         self._platform = "aiocqhttp"
+        self._platform_id = platform_id
         self._sender_name = f"昵称{qq}"
         self._self_qq = self_qq
         self._components = [Plain(msg)]
@@ -126,6 +128,17 @@ class FakeEvent:
 
     def get_platform_name(self):
         return self._platform
+
+    def get_platform_id(self):
+        """平台适配器实例 id（机器人名称），与生产 AstrMessageEvent 对齐。"""
+        return self._platform_id
+
+    @property
+    def unified_msg_origin(self) -> str:
+        """统一消息来源：{机器人名称}:{消息类型}:{会话 id}，与生产对齐。"""
+        if self._gid:
+            return f"{self._platform_id}:GroupMessage:{self._gid}"
+        return f"{self._platform_id}:FriendMessage:{self._qq}"
 
     def get_sender_name(self):
         return self._sender_name

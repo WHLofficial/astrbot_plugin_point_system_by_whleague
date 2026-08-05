@@ -338,7 +338,7 @@ async def test_redeem_handler_records():
         assert any("已核销" in m for m in msgs)
         assert plugin.context.sent, "跨群通知应通过 context 发送"
         origin, chain = plugin.context.sent[-1]
-        assert origin == "aiocqhttp:GroupMessage:G2", origin
+        assert origin == "bot1:GroupMessage:G2", origin
         assert "已通过核销" in str(chain)
         rec = await t.dao.get_redeem_record("R20260101-0002")
         assert rec["status"] == "verified" and rec["verified_by"] == "root"
@@ -356,9 +356,23 @@ async def test_redeem_handler_records():
         assert any("已核销" in m for m in msgs)
         assert ev_pri.sent == [], ev_pri.sent  # 私信渠道不走当前会话
         origin, chain = plugin.context.sent[-1]
-        assert origin == "aiocqhttp:FriendMessage:u1", origin
+        assert origin == "bot1:FriendMessage:u1", origin
         assert "已通过核销" in str(chain) and "u1" not in str(chain)
         plugin.config_cache["redeem_notify_channel"] = "group"
+        # 机器人名称缺失时回退 unified_msg_origin 首段（get_platform_id 不可用场景）
+        ev_fb = FakeEvent("root", "G1", is_admin=True, platform_id="botx")
+        ev_fb.get_platform_id = None
+        await t.db.execute(
+            "INSERT INTO redeem_records (record_no, qq, group_id, item_id, item_name, item_cost, quantity) "
+            "VALUES ('R20260101-0006','u5','G2',?,'物品6',10,1)",
+            (item_id,),
+        )
+        msgs = await collect(
+            handler.verify_record(ev_fb, "R20260101-0006", "verified", "")
+        )
+        assert any("已核销" in m for m in msgs)
+        origin, chain = plugin.context.sent[-1]
+        assert origin == "botx:GroupMessage:G2", origin
         # 跨群核销但插件无 context：通知失败 → 当前会话警告兜底
         plugin_nc = types.SimpleNamespace(
             dao=t.dao,

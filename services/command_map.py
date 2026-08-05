@@ -72,13 +72,13 @@ _COMMAND_SECTIONS = [
         "entries": [
             {
                 "trigger": "command",
-                "name": "/兑换",
+                "name": "/兑换商品",
                 "usage": "/兑换",
                 "desc": "查看可兑换物品列表",
             },
             {
                 "trigger": "command",
-                "name": "/兑换 <物品ID> [数量]",
+                "name": "/兑换商品 <物品ID> [数量]",
                 "usage": "/兑换 1",
                 "desc": "兑换物品，库存原子扣减",
             },

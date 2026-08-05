@@ -465,7 +465,7 @@ class PointSystemPlugin(Star):
     # Handlers: Redeem (command)
     # ═══════════════════════════════════════════════════════════
 
-    @filter.command("\u5151\u6362")
+    @filter.command("\u5151\u6362\u5546\u54c1")
     async def cmd_redeem(
         self, event: AstrMessageEvent
     ) -> AsyncGenerator[MessageEventResult, None]:

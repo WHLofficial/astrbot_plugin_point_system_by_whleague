@@ -3,7 +3,7 @@ import math
 import os
 import re
 
-PLUGIN_VERSION = "0.4.3"
+PLUGIN_VERSION = "0.5.0"
 """插件版本号。
 
 需要与 metadata.yaml 的 version 保持一致（发布时同步更新）。
@@ -194,6 +194,18 @@ def validate_and_cast(key: str, raw: str):
                 'lottery_tiers \u9700\u4e3a\u5408\u6cd5 JSON ({"tiers": [{"label": "...", "weight": >0, "points_min": 0~points_max, "points_max": int, ...}]})'
             )
         return raw
+
+    if key == "redeem_notify_channel":
+        norm = {
+            "group": "group",
+            "群": "group",
+            "private": "private",
+            "私信": "private",
+            "私聊": "private",
+        }.get(raw.strip().lower())
+        if norm is None:
+            raise ValueError("redeem_notify_channel 需为 group(群) 或 private(私信)")
+        return norm
 
     t = TYPE_MAP.get(key, str)
     if t is bool:

@@ -320,5 +320,13 @@
     "hint": "指令图图片缓存的时长（小时），0 表示禁用缓存、每次重新渲染。",
     "type": "int",
     "default": 24
+  },
+  "redeem_notify_channel": {
+    "description": "核销通知发送方式",
+    "hint": "选择核销后通知兑换者的渠道：原兑换群 @通知 / 私信通知（私信需平台支持，失败时会在当前会话提示）。",
+    "type": "string",
+    "default": "group",
+    "options": ["group", "private"],
+    "labels": ["原兑换群 @通知", "私信通知"]
   }
 }

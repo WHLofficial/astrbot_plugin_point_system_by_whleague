@@ -1,15 +1,50 @@
+import asyncio
 from collections.abc import AsyncGenerator
 
 from astrbot.api import logger
 from astrbot.api.event import MessageChain, MessageEventResult
 from astrbot.api.platform import MessageType
 
-from ..utils.security import parse_int, sanitize_text
+from ..utils.group_info import fetch_member_info
+from ..utils.security import clean_display_name, parse_int, sanitize_text
 
 
 class RedeemHandler:
     def __init__(self, plugin):
         self._plugin = plugin
+
+    async def _fetch_names(
+        self, bot, pairs, fallback_group_id: str | None = None
+    ) -> list[str]:
+        """批量解析兑换者昵称：优先记录所在群，其次管理员当前群，最后回退 QQ。
+
+        Args:
+            bot: 平台 bot；None 时直接回退 QQ。
+            pairs: [(qq, group_id), ...]，group_id 为兑换发生时的群。
+            fallback_group_id: 记录群查不到成员时的兜底群（管理员当前群）。
+
+        Returns:
+            与 pairs 等长的昵称列表。
+        """
+        if bot is None or not pairs:
+            return [qq for qq, _ in pairs]
+
+        async def _one(qq, gid):
+            info = await fetch_member_info(bot, qq, gid)
+            if info is None and fallback_group_id and fallback_group_id != gid:
+                info = await fetch_member_info(bot, qq, fallback_group_id)
+            if info:
+                # 控制字符清洗防注入（与排行/查生日一致，card/nickname 均清洗）
+                name = clean_display_name(
+                    info.get("card") or info.get("nickname") or ""
+                )
+                return name or qq
+            return qq
+
+        try:
+            return await asyncio.gather(*(_one(q, g) for q, g in pairs))
+        except Exception:
+            return [qq for qq, _ in pairs]
 
     async def list_items(self, event) -> AsyncGenerator[MessageEventResult, None]:
         try:
@@ -99,12 +134,24 @@ class RedeemHandler:
                         else "\u23f3 \u672a\u6838\u9500"
                     )
                 )
+                names = await self._fetch_names(
+                    getattr(event, "bot", None),
+                    [(record["qq"], record["group_id"])],
+                    fallback_group_id=group_id,
+                )
+                redeemer = names[0]
+                redeemer_text = (
+                    f"{redeemer}({record['qq']})"
+                    if redeemer != record["qq"]
+                    else record["qq"]
+                )
                 lines = [
                     f"\U0001f4cb \u5151\u6362\u8bb0\u5f55 {record['record_no']}",
                     f"\u7269\u54c1: {record['item_name']}",
                     f"\u6570\u91cf: {record['quantity']}",
                     f"\u6d88\u8017: {record['item_cost']} \u79ef\u5206",
                     f"\u72b6\u6001: {status_text}",
+                    f"\u5151\u6362\u8005: {redeemer_text}",
                 ]
                 if record["admin_note"]:
                     lines.append(f"\u5907\u6ce8: {record['admin_note']}")
@@ -112,7 +159,8 @@ class RedeemHandler:
                 yield event.plain_result("\n".join(lines))
                 return
 
-            if (target == "all" or target == "pending") and is_admin:
+            is_admin_list = (target == "all" or target == "pending") and is_admin
+            if is_admin_list:
                 status_filter = "pending" if target == "pending" else None
                 if event.is_admin():
                     records = await self._plugin.dao.get_redeem_records_all(
@@ -134,6 +182,15 @@ class RedeemHandler:
                 yield event.plain_result("\u6ca1\u6709\u8bb0\u5f55")
                 return
 
+            name_map = {}
+            if is_admin_list:
+                names = await self._fetch_names(
+                    getattr(event, "bot", None),
+                    [(r["qq"], r["group_id"]) for r in records],
+                    fallback_group_id=group_id,
+                )
+                name_map = dict(zip([r["qq"] for r in records], names))
+
             lines = [f"\U0001f4cb \u5151\u6362\u8bb0\u5f55 (\u7b2c{page}\u9875)"]
             for r in records:
                 if r["status"] == "verified":
@@ -142,9 +199,13 @@ class RedeemHandler:
                     status_icon = "\u274c"
                 else:
                     status_icon = "\u23f3"
-                lines.append(
+                line = (
                     f"{status_icon} {r['record_no']} {r['item_name']}x{r['quantity']} {r['item_cost']}\u79ef\u5206"
                 )
+                if is_admin_list:
+                    name = name_map.get(r["qq"], r["qq"])
+                    line += f" {name}({r['qq']})" if name != r["qq"] else f" {r['qq']}"
+                lines.append(line)
             yield event.plain_result("\n".join(lines))
         except Exception as e:
             logger.error(f"List records error: {e}")

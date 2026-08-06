@@ -290,6 +290,7 @@ async def test_redeem_handler_records():
         )
         text = "\n".join(msgs)
         assert "R20260101-0001" in text and "物品1" in text and "未核销" in text
+        assert "兑换者: u1" in text, text
         # 记录不存在
         msgs = await collect(
             handler.list_records(FakeEvent("u1", "G1"), "R99999999-0001", "1")
@@ -314,6 +315,26 @@ async def test_redeem_handler_records():
         assert any("没有权限" in m for m in msgs)
         # 核销：群管理成功 + 备注落库 + @ 通知兑换者
         await t.dao.add_admin("admin", "owner", "G1")
+        # 管理员查看 all/pending：行尾展示兑换者（无 bot 回退 QQ，本群群管仅本群记录）
+        ev_admin = FakeEvent("admin", "G1", is_admin=False, msg="/兑换记录 all")
+        msgs = await collect(handler.list_records(ev_admin, "all", "1"))
+        assert any("R20260101-0001 物品1x1 10积分 u1" in m for m in msgs), msgs
+        assert not any("R20260101-0002" in m for m in msgs), msgs
+        msgs = await collect(handler.list_records(ev_admin, "pending", "1"))
+        assert any("R20260101-0001 物品1x1 10积分 u1" in m for m in msgs), msgs
+        # 带 bot：显示群名片昵称 + QQ；详情视图带标签（昵称路径要求数字 QQ/群，走全局管理员跨群视图）
+        await t.db.execute(
+            "INSERT INTO redeem_records (record_no, qq, group_id, item_id, item_name, item_cost, quantity) "
+            "VALUES ('R20260101-0007','10001','888',?,'物品7',30,1)",
+            (item_id,),
+        )
+        ev_root_bot = FakeEvent(
+            "root", "G1", is_admin=True, bot=FakeBot(member_card="小红")
+        )
+        msgs = await collect(handler.list_records(ev_root_bot, "all", "1"))
+        assert any("R20260101-0007 物品7x1 30积分 小红(10001)" in m for m in msgs), msgs
+        msgs = await collect(handler.list_records(ev_root_bot, "R20260101-0007", "1"))
+        assert any("兑换者: 小红(10001)" in m for m in msgs), msgs
         ev = FakeEvent("admin", "G1", is_admin=False, msg="/核销 R20260101-0001 已发货")
         msgs = await collect(
             handler.verify_record(ev, "R20260101-0001", "verified", "已发货")

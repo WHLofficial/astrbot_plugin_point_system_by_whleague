@@ -218,6 +218,7 @@ async def test_cross_group_isolation():
         ev = FakeEvent("gadmin", "G1", is_admin=False, msg="/兑换记录 all")
         msgs = await collect(handler.list_records(ev, "all", "1"))
         assert any("RG1-001" in m for m in msgs), msgs
+        assert any("RG1-001 物品1x1 10积分 a" in m for m in msgs), msgs
         assert not any("RG2-001" in m for m in msgs), msgs
         # 详情：其他群记录被拒
         ev2 = FakeEvent("gadmin", "G1", is_admin=False, msg="/兑换记录 RG2-001")

@@ -201,6 +201,9 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
+# Design doc (local only)
+DESIGN.md
+
 # Marimo
 marimo/_static/
 marimo/_lsp/

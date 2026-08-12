@@ -105,6 +105,51 @@ async def test_catalog_integrity():
     return f"目录完整性：{len(registered)} 指令 + {len(aliases)} 别名全部登记"
 
 
+async def test_alias_match_semantics():
+    """注册指令的匹配语义（模拟 AstrBot CommandFilter：全等或以「名+空格」为前缀）。
+
+    覆盖：/商品兑换 主指令与 /兑换 别名均可命中；旧指令 /兑换商品 已失效；
+    别名 /兑换 与 /兑换记录 等指令按前缀空格规则互斥，无歧义命中。
+    """
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    with open(os.path.join(root, "main.py"), encoding="utf-8") as f:
+        main_src = f.read()
+    cmd_re = re.compile(
+        r'@filter\.command\("([^"]+)"(?:,\s*alias=\{(.*?)\})?\)'
+    )
+    names = []
+    for m in cmd_re.finditer(main_src):
+        names.append(_decode_escapes(m.group(1)))
+        if m.group(2):
+            for a in re.findall(r'"([^"]+)"', m.group(2)):
+                names.append(_decode_escapes(a))
+
+    assert "商品兑换" in names, "缺少 /商品兑换 主指令"
+    assert "兑换" in names, "缺少 /兑换 别名"
+
+    def matches(message: str) -> list[str]:
+        return [
+            n
+            for n in names
+            if message == n or message.startswith(f"{n} ")
+        ]
+
+    # 主指令与别名均可命中（含参数形式；消息为去除唤醒前缀后的文本，指令名无 /）
+    assert "商品兑换" in matches("商品兑换 1 2"), "/商品兑换 未被主指令命中"
+    assert "兑换" in matches("兑换 2"), "/兑换 别名未被命中"
+    # 旧指令 /兑换商品 已移除：不以「兑换 」前缀误命中别名，也不作为指令命中
+    assert matches("兑换商品 1") == [], "/兑换商品 不应再命中任何指令"
+    # 前缀互斥：/兑换记录 仅命中「兑换记录」，不被别名「兑换」抢先
+    assert matches("兑换记录 2") == ["兑换记录"], "/兑换记录 与别名 /兑换 冲突"
+    # 全量互斥：任一指令名不得成为另一指令名的「名+空格」前缀
+    for n in names:
+        for other in names:
+            assert n == other or not other.startswith(f"{n} "), (
+                f"指令名前缀冲突: {n} 是 {other} 的前缀"
+            )
+    return "别名语义：/兑换 可触发、/兑换商品 已失效、与 /兑换记录 前缀互斥"
+
+
 async def test_build_data_dynamic():
     cfg = base_cfg(
         keyword_sign=["签到", "打卡"],
@@ -377,6 +422,7 @@ async def test_cache_sweep_syncs_mem():
 
 TESTS = [
     ("catalog_integrity", test_catalog_integrity),
+    ("alias_match_semantics", test_alias_match_semantics),
     ("build_data_dynamic", test_build_data_dynamic),
     ("markdown_poster_data", test_markdown_and_poster_data),
     ("signature", test_signature_stability_and_invalidation),

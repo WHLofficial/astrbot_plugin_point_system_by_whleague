@@ -582,15 +582,17 @@ async def test_main_routes():
         # 非唤醒命令：严格触发才走 handler
         msgs = await collect(obj.on_sign_in(FakeEvent("u1", "G1", msg="签到")))
         assert msgs == ["签到了"] and len(obj.sign_in_handler.calls) == 1
-        # cmd_redeem 参数路由
+        # cmd_redeem 参数路由（/商品兑换 主指令，/兑换 别名）
         obj.redeem_handler = _RedeemHandler()
-        await collect(obj.cmd_redeem(FakeEvent("u1", "G1", msg="/兑换商品")))
-        await collect(obj.cmd_redeem(FakeEvent("u1", "G1", msg="/兑换商品 1")))
-        await collect(obj.cmd_redeem(FakeEvent("u1", "G1", msg="/兑换商品 1 2")))
+        await collect(obj.cmd_redeem(FakeEvent("u1", "G1", msg="/商品兑换")))
+        await collect(obj.cmd_redeem(FakeEvent("u1", "G1", msg="/商品兑换 1")))
+        await collect(obj.cmd_redeem(FakeEvent("u1", "G1", msg="/商品兑换 1 2")))
+        await collect(obj.cmd_redeem(FakeEvent("u1", "G1", msg="/兑换 2")))
         assert obj.redeem_handler.calls == [
             "list",
             ("redeem", "1", "1"),
             ("redeem", "1", "2"),
+            ("redeem", "2", "1"),
         ]
         # cmd_redeem_records：纯数字视为页码，all/pending/R 前缀保持原语义，中文别名归一化
         await collect(obj.cmd_redeem_records(FakeEvent("u1", "G1", msg="/兑换记录 2")))

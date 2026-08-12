@@ -55,16 +55,26 @@ class RedeemHandler:
                 )
                 return
             lines = ["\U0001f4e6 \u53ef\u5151\u6362\u7269\u54c1"]
+            lines.append(
+                "\U0001f4a1 \u5151\u6362\u65b9\u6cd5\uff1a\u53d1\u9001\u300c/\u5546\u54c1\u5151\u6362 "
+                "\u7269\u54c1ID [\u6570\u91cf]\u300d\uff0c\u793a\u4f8b\uff1a/\u5546\u54c1\u5151\u6362 1 2"
+            )
+            lines.append("\u2500" * 30)
             for it in items:
                 stock_str = "\u221e" if it["stock"] == -1 else str(it["stock"])
                 price = f"{it['cost']} \u79ef\u5206"
                 if it["discount_label"]:
                     price += f" (\u539f{it['original_cost']}, {it['discount_label']})"
                 lines.append(
-                    f"{it['id']}. {it['name']}  {price}  \u5e93\u5b58: {stock_str}"
+                    f"\u3010ID {it['id']}\u3011{it['name']}  {price}  \u5e93\u5b58: {stock_str}"
                 )
                 if it["description"]:
                     lines.append(f"   {it['description']}")
+            lines.append("\u2500" * 30)
+            lines.append(
+                "\U0001f4a1 \u53d1\u9001\u300c/\u5546\u54c1\u5151\u6362 \u7269\u54c1ID "
+                "[\u6570\u91cf]\u300d\u5373\u53ef\u5151\u6362"
+            )
             yield event.plain_result("\n".join(lines))
         except Exception as e:
             logger.error(f"List items error: {e}")
@@ -126,7 +136,7 @@ class RedeemHandler:
                     )
                     return
                 status_text = (
-                    "\u2714 \u5df2\u6838\u9500"
+                    "\u2705 \u5df2\u6838\u9500"
                     if record["status"] == "verified"
                     else (
                         "\u274c \u5df2\u9a73\u56de"
@@ -194,7 +204,7 @@ class RedeemHandler:
             lines = [f"\U0001f4cb \u5151\u6362\u8bb0\u5f55 (\u7b2c{page}\u9875)"]
             for r in records:
                 if r["status"] == "verified":
-                    status_icon = "\u2714"
+                    status_icon = "\u2705"
                 elif r["status"] == "rejected":
                     status_icon = "\u274c"
                 else:

@@ -66,6 +66,33 @@ class RankingHandler:
                     lines.append(f"{i}. {name}  {u['points']} 积分 (群{u['group_id']})")
                 else:
                     lines.append(f"{i}. {name}  {u['points']} 积分")
+
+            # 触发者自己不在榜上时，末尾追加分隔线与自己的排名（未上榜引导签到）
+            qq = event.get_sender_id()
+            if all(u["qq"] != qq for u in users):
+                lines.append("\u2500" * 15)
+                self_rank = await self._plugin.ranking_service.get_self_rank(
+                    qq, group_id, result["is_global"]
+                )
+                if self_rank is None:
+                    sign_kw = (
+                        self._plugin.config_cache.get("keyword_sign") or ["签到"]
+                    )[0]
+                    lines.append(
+                        f"\u4f60: \u672a\u4e0a\u699c\uff0c\u53d1\u9001\u300c{sign_kw}\u300d"
+                        "\u5373\u53ef\u83b7\u5f97\u79ef\u5206"
+                    )
+                else:
+                    rank, points, gid = self_rank
+                    self_name = (
+                        await self._fetch_names(
+                            getattr(event, "bot", None), [(qq, gid or group_id)]
+                        )
+                    )[0]
+                    suffix = f" (\u7fa4{gid})" if result["is_global"] else ""
+                    lines.append(
+                        f"\u4f60: \u7b2c {rank} \u540d \u00b7 {self_name} \u00b7 {points} \u79ef\u5206{suffix}"
+                    )
             yield event.plain_result("\n".join(lines))
         except Exception as e:
             logger.error(f"Ranking error: {e}")

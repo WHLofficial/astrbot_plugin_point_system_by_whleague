@@ -121,6 +121,33 @@ class PointDAO:
         )
         return rank_row["rank"] if rank_row else 1
 
+    async def get_rank_global(
+        self, qq: str, min_points: int = 1
+    ) -> tuple | None:
+        """返回用户全局积分榜排名（1 起，同分同名次）。
+
+        与 get_top_n_global 口径一致（accounts 全局 + 最近活跃群）：账户不存在
+        或积分低于 min_points 时返回 None（未上榜）。
+        """
+        row = await self._db.fetchone(
+            "SELECT a.points, "
+            "(SELECT u2.group_id FROM users u2 WHERE u2.qq=a.qq "
+            " ORDER BY u2.updated_at DESC, u2.id DESC LIMIT 1) AS group_id "
+            "FROM accounts a WHERE a.qq=?",
+            (qq,),
+        )
+        if not row or row["points"] < min_points:
+            return None
+        rank_row = await self._db.fetchone(
+            "SELECT COUNT(*)+1 AS rank FROM accounts a WHERE a.points > ?",
+            (row["points"],),
+        )
+        return (
+            rank_row["rank"] if rank_row else 1,
+            row["points"],
+            row["group_id"],
+        )
+
     async def count_users_in_group(self, group_id: str) -> int:
         row = await self._db.fetchone(
             "SELECT COUNT(*) AS cnt FROM users WHERE group_id=?", (group_id,)

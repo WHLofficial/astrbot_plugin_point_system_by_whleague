@@ -568,6 +568,14 @@ async def test_dao_misc():
         )
         assert [r["qq"] for r in await t.dao.get_birthday_users("G1", "12-25")] == ["d"]
         assert await t.dao.count_users_in_group("G1") == 4
+        # get_rank_global 全局排名（与全局榜口径一致：accounts 全局 + 最近活跃群）
+        await t.db.execute("INSERT INTO accounts (qq, points) VALUES ('e',10)")
+        await t.db.execute("INSERT INTO users (qq, group_id) VALUES ('e','G1')")
+        assert await t.dao.get_rank_global("a") == (1, 10, "G1")  # 10 分全局最高
+        assert await t.dao.get_rank_global("e") == (1, 10, "G1")  # 同分同名次
+        assert await t.dao.get_rank_global("b") is None  # 0 分未上榜
+        assert await t.dao.get_rank_global("c") is None  # 负分未上榜
+        assert await t.dao.get_rank_global("nobody") is None  # 无账户
     return "DAO：播报幂等/字段白名单/排行过滤/生日查询"
 
 

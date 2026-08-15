@@ -137,7 +137,10 @@ async def test_ranking_handler_display():
         )
 
         handler = RankingHandler(
-            types.SimpleNamespace(ranking_service=RankingService(t.dao))
+            types.SimpleNamespace(
+                ranking_service=RankingService(t.dao),
+                config_cache=base_cfg(),
+            )
         )
         # 空榜
         msgs = await collect(handler.handle(FakeEvent("u1", "G1", msg="/排行")))
@@ -181,6 +184,54 @@ async def test_ranking_handler_display():
         text = "\n".join(msgs)
         assert "neg" not in text and "zero" not in text
     return "排行 handler：空榜/本群/回退全局/排除非正分"
+
+
+async def test_ranking_self_line():
+    """查看排行时最后一行显示触发者自己的排名（不在 Top10 时；未上榜引导签到）。"""
+    async with TempDB() as t:
+        from astrbot_plugin_point_system_by_whleague.handlers.ranking import (
+            RankingHandler,
+        )
+        from astrbot_plugin_point_system_by_whleague.services.ranking_service import (
+            RankingService,
+        )
+
+        handler = RankingHandler(
+            types.SimpleNamespace(
+                ranking_service=RankingService(t.dao),
+                config_cache=base_cfg(),
+            )
+        )
+        # 11 人在本群：Top10 = u0..u9（30..21 分），u10=20 第 11 名，me=5 第 12 名
+        for i in range(11):
+            await t.db.execute(
+                "INSERT INTO accounts (qq, points) VALUES (?,?)",
+                (f"u{i}", 30 - i),
+            )
+            await t.db.execute(
+                "INSERT INTO users (qq, group_id) VALUES (?,?)", (f"u{i}", "G1")
+            )
+        await t.db.execute("INSERT INTO accounts (qq, points) VALUES ('me',5)")
+        await t.db.execute("INSERT INTO users (qq, group_id) VALUES ('me','G1')")
+        msgs = await collect(handler.handle(FakeEvent("me", "G1", msg="/排行")))
+        text = "\n".join(msgs)
+        assert "你: 第 12 名 · me · 5 积分" in text, text
+        # 全局榜：触发者不在全局 Top10 → 行尾附最近活跃群
+        msgs = await collect(handler.handle(FakeEvent("me", "G2", msg="/排行")))
+        text = "\n".join(msgs)
+        assert "全局排行" in text
+        assert "你: 第 12 名 · me · 5 积分 (群G1)" in text, text
+        # 未上榜（0 分）→ 引导签到（keyword_sign 第一个词）
+        await t.db.execute("INSERT INTO accounts (qq, points) VALUES ('low',0)")
+        await t.db.execute("INSERT INTO users (qq, group_id) VALUES ('low','G1')")
+        msgs = await collect(handler.handle(FakeEvent("low", "G1", msg="/排行")))
+        text = "\n".join(msgs)
+        assert "你: 未上榜，发送「签到」即可获得积分" in text, text
+        # 已在榜上不追加自己的行
+        msgs = await collect(handler.handle(FakeEvent("u0", "G1", msg="/排行")))
+        text = "\n".join(msgs)
+        assert "你:" not in text, text
+    return "排行：自己的排名行/未上榜引导签到/已在榜不追加"
 
 
 async def test_stats_handler_full():
@@ -257,8 +308,8 @@ async def test_redeem_handler_items():
     return "兑换 handler：列表/折扣/∞库存/参数错误/数量上限/不存在"
 
 
-async def test_redeem_list_single_rule():
-    """兑换列表横线 2→1 条（≤3 物品仍走纯文本，仅 1 条横线）。"""
+async def test_redeem_list_short_rules():
+    """兑换列表横线各缩短一半（上下两条均为 15 个 ─，≤3 物品仍走纯文本）。"""
     async with TempDB() as t:
         from astrbot_plugin_point_system_by_whleague.handlers.redeem import (
             RedeemHandler,
@@ -280,9 +331,10 @@ async def test_redeem_list_single_rule():
             await t.dao.add_item(f"物品{i + 1}", 100, 10)
         msgs = await collect(handler.list_items(FakeEvent("u1", "G1")))
         text = "\n".join(msgs)
-        # 横线 2→1 条：列表恰含一条整行横线
-        assert text.count("\u2500" * 30) == 1, text
-    return "兑换列表：横线减半（≤3 物品纯文本仅 1 条横线）"
+        # 上下两条横线各缩短一半（30→15），旧长度不再出现
+        assert text.count("\u2500" * 15) == 2, text
+        assert "\u2500" * 30 not in text, text
+    return "兑换列表：横线上下各缩短一半（≤3 物品纯文本两条短横线）"
 
 
 async def test_redeem_list_forward():
@@ -987,9 +1039,10 @@ TESTS = [
     ("signin_handler", test_signin_handler_basic),
     ("lottery_handler", test_lottery_handler_paths),
     ("ranking_handler", test_ranking_handler_display),
+    ("ranking_self_line", test_ranking_self_line),
     ("stats_handler", test_stats_handler_full),
     ("redeem_items", test_redeem_handler_items),
-    ("redeem_list_single_rule", test_redeem_list_single_rule),
+    ("redeem_list_short_rules", test_redeem_list_short_rules),
     ("redeem_list_forward", test_redeem_list_forward),
     ("redeem_records", test_redeem_handler_records),
     ("transactions_cmd", test_transactions_command),

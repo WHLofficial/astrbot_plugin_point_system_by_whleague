@@ -60,7 +60,7 @@ class RedeemHandler:
                 "\U0001f4a1 \u5151\u6362\u65b9\u6cd5\uff1a\u53d1\u9001\u300c/\u5546\u54c1\u5151\u6362 "
                 "\u7269\u54c1ID [\u6570\u91cf]\u300d\uff0c\u793a\u4f8b\uff1a/\u5546\u54c1\u5151\u6362 1 2"
             )
-            lines.append("\u2500" * 30)
+            lines.append("\u2500" * 15)
             for it in items:
                 stock_str = "\u221e" if it["stock"] == -1 else str(it["stock"])
                 price = f"{it['cost']} \u79ef\u5206"
@@ -71,6 +71,7 @@ class RedeemHandler:
                 )
                 if it["description"]:
                     lines.append(f"   {it['description']}")
+            lines.append("\u2500" * 15)
             lines.append(
                 "\U0001f4a1 \u53d1\u9001\u300c/\u5546\u54c1\u5151\u6362 \u7269\u54c1ID "
                 "[\u6570\u91cf]\u300d\u5373\u53ef\u5151\u6362"

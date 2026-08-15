@@ -43,6 +43,10 @@ class RateLimiter:
         remaining = cooldown - (time.time() - self._user_cooldowns.get(key, 0))
         return max(remaining, 0)
 
+    def clear_user(self, action: str, qq: str, group_id: str) -> None:
+        """清除指定用户的冷却记录（不存在时静默），供拦截类场景不计冷却。"""
+        self._user_cooldowns.pop(self._user_key(action, qq, group_id), None)
+
     def check_group(self, action: str, group_id: str, cooldown: int) -> bool:
         if cooldown <= 0:
             return True

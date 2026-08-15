@@ -25,6 +25,10 @@ class RobError(Exception):
     """打劫业务错误（事务内抛出，execute_transaction 回滚后转为提示文案）。"""
 
 
+class RobTargetLimitError(RobError):
+    """目标被劫上限拦截：打劫未实际执行，不应消耗打劫者冷却。"""
+
+
 class RobService:
     def __init__(self, db, dao, point_svc, config_cache, rate_limiter):
         self._db = db
@@ -132,13 +136,13 @@ class RobService:
                 own_robs = await PointDAO.count_robs_today(conn, target_qq)
                 limit = max(target_daily_limit, 1) + own_robs
                 if total_hits >= limit:
-                    raise RobError(
+                    raise RobTargetLimitError(
                         f"\u76ee\u6807\u4eca\u65e5\u5df2\u88ab\u6253\u52ab {total_hits} \u6b21"
                         f"\uff08\u4eca\u65e5\u4e0a\u9650 {limit}\uff09\uff0c\u65e0\u6cd5\u518d\u88ab\u6253\u52ab"
                     )
             elif target_daily_limit > 0:
                 if total_hits >= target_daily_limit:
-                    raise RobError(
+                    raise RobTargetLimitError(
                         f"\u76ee\u6807\u4eca\u65e5\u5df2\u88ab\u6253\u52ab {total_hits} \u6b21\uff0c\u65e0\u6cd5\u518d\u88ab\u6253\u52ab"
                     )
 
@@ -209,6 +213,10 @@ class RobService:
                 _tx
             )
         except RobError as e:
+            # 目标被劫上限拦截：打劫未实际执行，清除本次预写入的冷却，
+            # 打劫者可立即转打其他目标
+            if isinstance(e, RobTargetLimitError):
+                self._limiter.clear_user("rob", qq, group_id)
             return {"success": False, "performed": False, "msg": str(e)}
 
         # 负分联动：失败扣成本可能致负；目标可能被抢成负

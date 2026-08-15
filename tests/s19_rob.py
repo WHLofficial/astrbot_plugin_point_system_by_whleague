@@ -169,6 +169,28 @@ async def test_daily_limit():
     return "打劫：每日限次按 QQ 全局统计、达上限拒绝"
 
 
+async def test_own_daily_limit_keeps_cooldown():
+    """打劫者自身每日上限拦截仍消耗冷却（仅目标被劫上限不计冷却，范围锁定）。"""
+    from unittest import mock
+
+    async with TempDB() as t:
+        cfg = base_cfg(rob_cooldown=600, rob_daily_limit=1)
+        _, ps, rs, lim = await _build(t, cfg)
+        await _grant(ps, "10021", "1001", 1000)
+        await _grant(ps, "10022", "1001", 2000)
+        # 第 1 次打劫（失败）消耗当日限额并写入冷却
+        with patch_random(random=0.9):
+            r1 = await rs.rob("10021", "10022", "1001")
+        assert r1["performed"] is True
+        assert lim.get_remaining("rob", "10021", "1001", 600) > 0
+        # 绕过冷却检查触发自身每日上限拦截：冷却记录不应被清除
+        with mock.patch.object(lim, "check_user", return_value=True):
+            r2 = await rs.rob("10021", "10022", "1001")
+        assert r2["performed"] is False and "上限" in r2["msg"]
+        assert lim.get_remaining("rob", "10021", "1001", 600) > 0
+    return "打劫：自身每日上限拦截仍消耗冷却（仅目标上限不计）"
+
+
 async def test_cooldown_enters_after_success_and_failure():
     async with TempDB() as t:
         cfg = base_cfg(rob_cooldown=600)
@@ -253,7 +275,7 @@ async def test_no_cooldown_when_zero():
 
 async def test_target_daily_limit():
     """目标每日被劫上限（默认 6，全部次数口径）：6 人集火后第 7 个被拒，
-    被拒打劫者已消耗冷却。"""
+    被拒打劫者不消耗冷却，可立即转打其他目标。"""
     async with TempDB() as t:
         cfg, ps, rs, lim = await _build(t)
         await _grant(ps, "10002", "1001", 2000)  # 目标
@@ -268,18 +290,21 @@ async def test_target_daily_limit():
         r7 = await rs.rob("10107", "10002", "1001")
         assert r7["performed"] is False
         assert "目标今日已被打劫 6 次" in r7["msg"]
-        # 拦截已消耗打劫者冷却：再打劫其他目标也被冷却拦截
+        # 拦截不消耗打劫者冷却：冷却已被清除
+        assert lim.get_remaining("rob", "10107", "1001", cfg["rob_cooldown"]) == 0
+        # 可立即转打其他目标（成功打劫后重新进入冷却，符合成功/失败均计冷却语义）
         await _grant(ps, "90001", "1001", 500)
-        r8 = await rs.rob("10107", "90001", "1001")
-        assert r8["performed"] is False and "冷却中" in r8["msg"]
-        # 拦截不产生记录
+        with patch_random(random=0.1):
+            r8 = await rs.rob("10107", "90001", "1001")
+        assert r8["performed"] is True
+        # 拦截不产生记录（针对被拦截目标 10002；r8 转打 90001 的记录属正常打劫）
         cnt = await t.db.fetchone(
-            "SELECT COUNT(*) AS c FROM rob_records WHERE qq='10107'"
+            "SELECT COUNT(*) AS c FROM rob_records WHERE qq='10107' AND target_qq='10002'"
         )
         assert cnt["c"] == 0
         # 固定方案拦截文案不带「今日上限」（与 v0.4.2 文案一致）
         assert "今日上限" not in r7["msg"]
-    return "防集火：目标每日被劫上限拦截、精确次数文案、拦截消耗冷却"
+    return "防集火：目标每日被劫上限拦截、精确次数文案、拦截不消耗冷却"
 
 
 async def test_target_limit_dynamic():
@@ -735,6 +760,7 @@ TESTS = [
     ("failure_cost_and_record", test_failure_cost_and_record),
     ("gates", test_gates),
     ("daily_limit", test_daily_limit),
+    ("own_daily_limit_keeps_cooldown", test_own_daily_limit_keeps_cooldown),
     ("cooldown_success_failure", test_cooldown_enters_after_success_and_failure),
     ("target_negative_title", test_target_negative_title_linkage),
     ("failure_guard_atomic", test_failure_guard_atomic_rollback),

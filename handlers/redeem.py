@@ -3,6 +3,7 @@ from collections.abc import AsyncGenerator
 
 from astrbot.api import logger
 from astrbot.api.event import MessageChain, MessageEventResult
+from astrbot.api.message_components import Node, Nodes, Plain
 from astrbot.api.platform import MessageType
 
 from ..utils.group_info import fetch_member_info
@@ -70,12 +71,22 @@ class RedeemHandler:
                 )
                 if it["description"]:
                     lines.append(f"   {it['description']}")
-            lines.append("\u2500" * 30)
             lines.append(
                 "\U0001f4a1 \u53d1\u9001\u300c/\u5546\u54c1\u5151\u6362 \u7269\u54c1ID "
                 "[\u6570\u91cf]\u300d\u5373\u53ef\u5151\u6362"
             )
-            yield event.plain_result("\n".join(lines))
+            text = "\n".join(lines)
+            if len(items) > 3:
+                # 物品较多时以伪造聊天记录（合并转发）呈现：整份列表为一条
+                # 「兑换小铺」消息，bot 自身作为发送者（uin 取 bot 自身 QQ）
+                node = Node(
+                    content=[Plain(text)],
+                    name="\u5151\u6362\u5c0f\u94fa",
+                    uin=str(event.get_self_id()),
+                )
+                yield event.chain_result([Nodes(nodes=[node])])
+                return
+            yield event.plain_result(text)
         except Exception as e:
             logger.error(f"List items error: {e}")
             yield event.plain_result(

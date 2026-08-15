@@ -67,6 +67,24 @@ class _AtAll(_At):
         super().__init__(qq="all", name=kwargs.get("name", "全体成员"))
 
 
+class _Node:
+    """astrbot.api.message_components.Node 桩（合并转发单条消息）。"""
+
+    def __init__(self, content=None, name="", uin="0", **_):
+        self.type = "Node"
+        self.content = content or []
+        self.name = name
+        self.uin = uin
+
+
+class _Nodes:
+    """astrbot.api.message_components.Nodes 桩（合并转发容器）。"""
+
+    def __init__(self, nodes=None, **_):
+        self.type = "Nodes"
+        self.nodes = nodes or []
+
+
 class _Star:
     def __init__(self, context=None):
         self.context = context
@@ -119,6 +137,8 @@ def install_stubs():
     mc_pkg.Plain = _Plain
     mc_pkg.At = _At
     mc_pkg.AtAll = _AtAll
+    mc_pkg.Node = _Node
+    mc_pkg.Nodes = _Nodes
     sys.modules["astrbot.api.message_components"] = mc_pkg
 
     sys.modules["astrbot"] = astrbot_pkg

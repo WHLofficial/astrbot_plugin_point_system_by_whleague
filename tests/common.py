@@ -151,6 +151,11 @@ class FakeEvent:
         self.results.append(r)
         return r
 
+    def chain_result(self, chain):
+        r = types.SimpleNamespace(chain=chain)
+        self.results.append(r)
+        return r
+
     async def get_group(self):
         if self._group_owner is None:
             return None

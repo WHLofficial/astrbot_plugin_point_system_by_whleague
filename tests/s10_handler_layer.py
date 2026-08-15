@@ -257,6 +257,71 @@ async def test_redeem_handler_items():
     return "兑换 handler：列表/折扣/∞库存/参数错误/数量上限/不存在"
 
 
+async def test_redeem_list_single_rule():
+    """兑换列表横线 2→1 条（≤3 物品仍走纯文本，仅 1 条横线）。"""
+    async with TempDB() as t:
+        from astrbot_plugin_point_system_by_whleague.handlers.redeem import (
+            RedeemHandler,
+        )
+        from astrbot_plugin_point_system_by_whleague.services.point_service import (
+            PointService,
+        )
+        from astrbot_plugin_point_system_by_whleague.services.redeem_service import (
+            RedeemService,
+        )
+
+        handler = RedeemHandler(
+            types.SimpleNamespace(
+                dao=t.dao,
+                redeem_service=RedeemService(t.db, t.dao, PointService(t.db, t.dao)),
+            )
+        )
+        for i in range(3):
+            await t.dao.add_item(f"物品{i + 1}", 100, 10)
+        msgs = await collect(handler.list_items(FakeEvent("u1", "G1")))
+        text = "\n".join(msgs)
+        # 横线 2→1 条：列表恰含一条整行横线
+        assert text.count("\u2500" * 30) == 1, text
+    return "兑换列表：横线减半（≤3 物品纯文本仅 1 条横线）"
+
+
+async def test_redeem_list_forward():
+    """兑换物品 >3 条：整体以伪造聊天记录（合并转发）发送，昵称「兑换小铺」。"""
+    async with TempDB() as t:
+        from astrbot_plugin_point_system_by_whleague.handlers.redeem import (
+            RedeemHandler,
+        )
+        from astrbot_plugin_point_system_by_whleague.services.point_service import (
+            PointService,
+        )
+        from astrbot_plugin_point_system_by_whleague.services.redeem_service import (
+            RedeemService,
+        )
+
+        handler = RedeemHandler(
+            types.SimpleNamespace(
+                dao=t.dao,
+                redeem_service=RedeemService(t.db, t.dao, PointService(t.db, t.dao)),
+            )
+        )
+        for i in range(4):
+            await t.dao.add_item(f"道具{i + 1}", 100, 10)
+        ev = FakeEvent("u1", "G1")
+        await collect(handler.list_items(ev))
+        assert len(ev.results) == 1
+        chain = ev.results[0].chain
+        assert len(chain) == 1
+        nodes = chain[0].nodes
+        assert len(nodes) == 1
+        node = nodes[0]
+        assert node.name == "兑换小铺"
+        assert node.uin == ev.get_self_id()
+        text = "".join(c.text for c in node.content if hasattr(c, "text"))
+        for i in range(4):
+            assert f"道具{i + 1}" in text
+    return "兑换列表：>3 条整体转发（昵称兑换小铺、bot 自身、含全部物品）"
+
+
 async def test_redeem_handler_records():
     async with TempDB() as t:
         from astrbot_plugin_point_system_by_whleague.handlers.redeem import (
@@ -924,6 +989,8 @@ TESTS = [
     ("ranking_handler", test_ranking_handler_display),
     ("stats_handler", test_stats_handler_full),
     ("redeem_items", test_redeem_handler_items),
+    ("redeem_list_single_rule", test_redeem_list_single_rule),
+    ("redeem_list_forward", test_redeem_list_forward),
     ("redeem_records", test_redeem_handler_records),
     ("transactions_cmd", test_transactions_command),
     ("main_routes", test_main_routes),

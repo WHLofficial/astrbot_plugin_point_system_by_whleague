@@ -1,7 +1,7 @@
 name: "astrbot_plugin_point_system_by_whleague"
 display_name: "积分系统 for WHL"
 desc: "积分系统 for WHL"
-version: "v0.5.5"
+version: "v0.5.6"
 author: "WHLofficial"
 repo: "https://github.com/WHLofficial/astrbot_plugin_point_system_by_whleague"
 support_platforms:

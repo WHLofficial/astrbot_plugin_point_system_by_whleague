@@ -187,7 +187,7 @@ async def test_ranking_handler_display():
 
 
 async def test_ranking_self_line():
-    """查看排行时最后一行显示触发者自己的排名（不在 Top10 时；未上榜引导签到）。"""
+    """查看排行时最后一行显示触发者自己的排名（不论是否在 Top10；未上榜引导签到）。"""
     async with TempDB() as t:
         from astrbot_plugin_point_system_by_whleague.handlers.ranking import (
             RankingHandler,
@@ -227,11 +227,11 @@ async def test_ranking_self_line():
         msgs = await collect(handler.handle(FakeEvent("low", "G1", msg="/排行")))
         text = "\n".join(msgs)
         assert "你: 未上榜，发送「签到」即可获得积分" in text, text
-        # 已在榜上不追加自己的行
+        # 在榜上（第 1 名）同样显示自己的排名行
         msgs = await collect(handler.handle(FakeEvent("u0", "G1", msg="/排行")))
         text = "\n".join(msgs)
-        assert "你:" not in text, text
-    return "排行：自己的排名行/未上榜引导签到/已在榜不追加"
+        assert "你: 第 1 名 · u0 · 30 积分" in text, text
+    return "排行：自己的排名行（不在榜/在榜/全局榜）/未上榜引导签到"
 
 
 async def test_stats_handler_full():

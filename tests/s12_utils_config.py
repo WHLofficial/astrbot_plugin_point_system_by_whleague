@@ -161,6 +161,8 @@ async def test_security_parsers():
 
 async def test_fortune_format():
     from astrbot_plugin_point_system_by_whleague.utils.fortune import (
+        _ADVICE,
+        _LEVELS,
         format_fortune,
         get_fortune,
     )
@@ -176,7 +178,11 @@ async def test_fortune_format():
     text2 = format_fortune("123", "2026-08-01", evil)
     assert "\r" not in text2 and "\x00" not in text2
     assert text2.count("\n") == 4  # 仅保留正常行分隔，昵称未引入新行
-    return "运势：字段结构/文案包含姓名/等级/建议/幸运数字/控制字符剥离"
+    # 格言库数量与权重防退化：≥50 条、无重复；七档权重和为 100
+    assert len(_ADVICE) >= 50, len(_ADVICE)
+    assert len(set(_ADVICE)) == len(_ADVICE)
+    assert sum(w for _, w, _ in _LEVELS) == 100
+    return "运势：字段结构/文案包含姓名/等级/建议/幸运数字/控制字符剥离/格言库数量"
 
 
 async def test_clean_display_name():

@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 from collections.abc import AsyncGenerator
 
 from astrbot.api import logger
@@ -126,6 +127,18 @@ class PointSystemPlugin(Star):
         self._cache_sweep_task = asyncio.create_task(
             self.command_map_handler.sweep_loop()
         )
+
+        # 竞猜系统同步通道：HTTP 服务 + 战报轮询（未启用时 start() 返回 False）
+        from .db.sync_dao import SyncDAO
+        from .handlers.sync import SyncHandler
+        from .services.sync_service import SyncService
+
+        self.sync_dao = SyncDAO(self.db)
+        self.sync_service = SyncService(self.db, self.sync_dao, self.point_service)
+        self.sync_handler = SyncHandler(self)
+        self._sync_poll_task = None
+        if await self.sync_handler.start():
+            self._sync_poll_task = asyncio.create_task(self.sync_handler.poll_loop())
 
         await self._start_cron_jobs()
 
@@ -807,6 +820,25 @@ class PointSystemPlugin(Star):
         await self.active_reward_handler.handle(event)
 
     # ═══════════════════════════════════════════════════════════
+    # Handlers: Guess-system sync (bind command)
+    # ═══════════════════════════════════════════════════════════
+
+    @filter.regex(r"^\s*/?\s*绑定\s+(\S+)\s*$")
+    async def on_sync_bind(
+        self, event: AstrMessageEvent
+    ) -> AsyncGenerator[MessageEventResult, None]:
+        """竞猜系统账号绑定：发送「绑定 <网页生成的一次性码>」。
+
+        严格锚定匹配（同签到逻辑），普通聊天含"绑定"二字不触发；
+        兼容带/不带唤醒前缀两种形态。
+        """
+        m = re.match(r"^\s*/?\s*绑定\s+(\S+)\s*$", event.get_message_str() or "")
+        if not m:
+            return
+        async for result in self.sync_handler.handle_bind(event, m.group(1)):
+            yield result
+
+    # ═══════════════════════════════════════════════════════════
     # Teardown
     # ═══════════════════════════════════════════════════════════
 
@@ -814,6 +846,11 @@ class PointSystemPlugin(Star):
         if hasattr(self, "_cache_sweep_task") and self._cache_sweep_task:
             self._cache_sweep_task.cancel()
             await asyncio.gather(self._cache_sweep_task, return_exceptions=True)
+        if getattr(self, "_sync_poll_task", None):
+            self._sync_poll_task.cancel()
+            await asyncio.gather(self._sync_poll_task, return_exceptions=True)
+        if hasattr(self, "sync_handler"):
+            await self.sync_handler.stop()
         await self._remove_cron_jobs()
         if hasattr(self, "db"):
             await self.db.close()

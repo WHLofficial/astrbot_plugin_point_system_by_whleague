@@ -206,6 +206,21 @@ CREATE TABLE IF NOT EXISTS plugin_config (
     updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 
+-- 竞猜系统同步幂等账本：payout_id 是全局唯一发放单号（幂等键）。
+-- credited_at 为 UTC；对账汇总按东八区日期过滤（datetime(credited_at,'+8 hours')）。
+-- 只存流水凭证，不存余额；入账与积分变更同事务写入。
+CREATE TABLE IF NOT EXISTS sync_ledger (
+    payout_id TEXT PRIMARY KEY,
+    qq_id TEXT NOT NULL,
+    amount INTEGER NOT NULL,
+    type TEXT NOT NULL,
+    event_id INTEGER,
+    credited_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_sync_ledger_qq ON sync_ledger(qq_id);
+CREATE INDEX IF NOT EXISTS idx_sync_ledger_date ON sync_ledger(credited_at);
+
 """
 
 

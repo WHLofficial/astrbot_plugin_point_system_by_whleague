@@ -328,5 +328,60 @@
     "default": "group",
     "options": ["group", "private"],
     "labels": ["原兑换群 @通知", "私信通知"]
+  },
+  "sync_enabled": {
+    "description": "启用竞猜系统同步",
+    "hint": "开启后：本机监听 HTTP 端口接收竞猜系统入账/对账请求（先验签），并定时轮询竞猜系统战报转发到指定群。未开启时同步模块完全不工作。",
+    "type": "bool",
+    "default": false
+  },
+  "sync_secret": {
+    "description": "同步通信密钥 SYNC_SECRET",
+    "hint": "与竞猜系统 .prod-secrets.txt 中 SYNC_SECRET 一致。仅存于 AstrBot 配置，请勿提交到任何 git 仓库或贴到日志/群里。留空则同步功能不生效。",
+    "type": "string",
+    "default": ""
+  },
+  "sync_base_url": {
+    "hint": "竞猜系统对外地址，例如 https://guess.whleague.win（本地联调用 http://127.0.0.1:8789）。插件用它调用绑定核销、战报拉取/确认接口。",
+    "description": "竞猜系统 BASE 地址",
+    "type": "string",
+    "default": "https://guess.whleague.win"
+  },
+  "sync_listen_host": {
+    "description": "同步服务监听地址",
+    "hint": "HTTP 服务监听地址。必须保持 127.0.0.1，由 cloudflared Tunnel 对外暴露，切勿直接监听 0.0.0.0。",
+    "type": "string",
+    "default": "127.0.0.1"
+  },
+  "sync_listen_port": {
+    "description": "同步服务监听端口",
+    "hint": "HTTP 服务监听端口，需与 cloudflared Tunnel 指向一致（默认 9991）。修改后需重启 AstrBot 生效。",
+    "type": "int",
+    "default": 9991
+  },
+  "sync_platform_id": {
+    "description": "战报发送平台 ID",
+    "hint": "转发战报使用的平台实例 id（AstrBot 消息平台配置里的 id 字段，如 aiocqhttp 实例通常为 aiocqhttp）。可在 AstrBot WebUI 消息平台页查看。",
+    "type": "string",
+    "default": "aiocqhttp"
+  },
+  "sync_report_groups": {
+    "description": "战报目标群",
+    "hint": "竞猜战报要转发到的群号列表（纯数字）。留空则只拉取不转发也不确认（下轮会重复拉取），请务必配置后再开启同步。",
+    "type": "list",
+    "items": {"type": "string"},
+    "default": []
+  },
+  "sync_poll_interval": {
+    "description": "战报轮询间隔(秒)",
+    "hint": "轮询竞猜系统待发战报的间隔秒数，最小 15。",
+    "type": "int",
+    "default": 60
+  },
+  "sync_bind_cooldown": {
+    "description": "绑定指令冷却(秒)",
+    "hint": "同一用户两次「绑定」指令的最小间隔秒数，防刷接口。",
+    "type": "int",
+    "default": 10
   }
 }

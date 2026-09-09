@@ -214,6 +214,16 @@ whl抽奖
 | cmd_map_user_cooldown | int | 30 | 同用户指令图生成冷却（秒，0=不限） |
 | cmd_map_group_cooldown | int | 10 | 同群指令图生成冷却（秒，0=不限） |
 | cmd_map_cache_ttl_hours | int | 24 | 指令图缓存有效期（小时，0=禁用缓存每次重新渲染） |
+| **竞猜同步** | | | |
+| sync_enabled | bool | false | 竞猜系统同步总开关 |
+| sync_secret | str | (空) | 同步通信密钥，与竞猜系统 SYNC_SECRET 一致；勿提交到 git 或外泄 |
+| sync_base_url | str | https://guess.whleague.win | 竞猜系统地址（本地联调 http://127.0.0.1:8789） |
+| sync_listen_host | str | 127.0.0.1 | HTTP 监听地址（保持回环，经 Tunnel 对外） |
+| sync_listen_port | int | 9991 | HTTP 监听端口（与 Tunnel 指向一致，改动需重启） |
+| sync_platform_id | str | aiocqhttp | 战报发送平台实例 id |
+| sync_report_groups | json | [] | 战报转发目标群号列表（留空则只拉取不确认） |
+| sync_poll_interval | int | 60 | 战报轮询间隔（秒，最小 15） |
+| sync_bind_cooldown | int | 10 | 绑定指令冷却（秒） |
 
 ### 抽奖五档默认配置
 
@@ -231,6 +241,36 @@ whl抽奖
 
 权重决定概率，命中档位后在 `points_min` ~ `points_max` 闭区间内随机获得积分。
 
+## 竞猜系统同步
+
+与 WHL 竞猜系统（[WHL-Daily-Activities-System](https://github.com/WHLofficial/WHL-Daily-Activities-System)）对接，插件作为**积分真源**：
+
+- **入账**：竞猜系统发放奖励/冲正时 POST `/sync/credit` 到本插件（HMAC-SHA256 验签，±300 秒时间窗），按 `payout_id` 幂等入账；与 `sync_ledger` 流水同事务写入，冲正余额不足时回滚返回 409
+- **对账**：竞猜系统每日定时 GET `/sync/summary?date=YYYY-MM-DD`，按东八区日期返回各 QQ 净额（含冲正负数）
+- **绑定**：用户在竞猜网页生成 10 分钟一次性码后，群内发送「**绑定 <码>**」完成 QQ ↔ 竞猜账号绑定（群聊裸发或带 `/` 前缀均可触发）
+- **战报**：插件每分钟轮询竞猜系统待发战报，原样转发到 `sync_report_groups` 配置的群，**全部群发送成功才**确认（ack）；失败下轮重拉
+
+### 配置与部署
+
+1. WebUI 插件配置中开启 `sync_enabled`，填入与竞猜系统一致的 `sync_secret`
+2. `sync_report_groups` 填战报目标群号；`sync_platform_id` 填消息平台实例 id（WebUI 消息平台页可查）
+3. 服务器上用 cloudflared 把公网域名指到本机端口：`cloudflared tunnel` 规则 `astrbot.whleague.win → http://127.0.0.1:9991`，竞猜系统 `SYNC_BASE_URL` 配 `https://astrbot.whleague.win`
+4. 验证：`curl https://astrbot.whleague.win/sync/summary` 应返回 `401 {"error":"bad sign"}`（说明服务可达且验签生效）
+
+> 安全：`sync_secret` 只存 AstrBot 托管配置，不进任何 git 仓库、不打日志；HTTP 仅监听 `127.0.0.1`，由 Tunnel 对外暴露；所有端点先验签。
+
+### 本地联调
+
+```bash
+# 1. 竞猜仓库 .dev.vars 设 SYNC_BASE_URL=http://127.0.0.1:9991（其余用 dev 默认值）
+# 2. 启动本插件的独立同步服务（无需完整 AstrBot）
+python -m tests.sync_standalone --secret testsecret --port 9991
+# 3. 启动竞猜系统
+npx wrangler dev --port 8789
+# 4. 跑端到端冒烟
+bash scripts/smoke-test.sh
+```
+
 ## 数据存储
 
 - **数据库文件**: `<AstrBot数据目录>/plugin_data/astrbot_plugin_point_system_by_whleague/points_system.db`（SQLite，WAL 模式），自动创建
@@ -239,11 +279,12 @@ whl抽奖
 - **备份路径**: 绝对路径直接使用；相对路径基于插件数据目录解析，支持 `~` 展开
 - **备份方式**: `VACUUM INTO` 生成一致快照（含 WAL 数据）
 - **备份保留**: 每个备份目录仅保留最近 `backup_keep_count` 份（默认 30，0=不清理），超出自动删除最旧备份（仅清理本插件 `points_system_*.db` 命名文件）
-- **数据库版本**: 当前 schema v5（积分一号跨群共享：`accounts` 表按 QQ 全局唯一账户，`users` 仅存群级数据；v4 起 `redeem_records` 含驳回审计列；v5 起新增 `rob_records` 打劫记录表），旧库首次加载时自动迁移（v4 → v5 纯新增表；v3 → v4 驳回审计列；v2 → v3 多群余额取 MAX 合并；v1 → v2 负分头衔原名片、流水操作人字段），升级前建议先备份数据库
+- **数据库版本**: 当前 schema v5（积分一号跨群共享：`accounts` 表按 QQ 全局唯一账户，`users` 仅存群级数据；v4 起 `redeem_records` 含驳回审计列；v5 起新增 `rob_records` 打劫记录表；v0.6.0 起 `sync_ledger` 竞猜同步幂等账本随建表脚本自动创建，无需版本迁移），旧库首次加载时自动迁移（v4 → v5 纯新增表；v3 → v4 驳回审计列；v2 → v3 多群余额取 MAX 合并；v1 → v2 负分头衔原名片、流水操作人字段），升级前建议先备份数据库
 
 ## 依赖
 
 - `aiosqlite >= 0.20.0` — 异步 SQLite 驱动
+- `aiohttp >= 3.11.18` — 竞猜同步 HTTP 服务/客户端（AstrBot 宿主已内置）
 
 ## 开发
 

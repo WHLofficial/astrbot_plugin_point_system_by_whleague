@@ -45,6 +45,7 @@ SUITES = [
     ("s17_command_map", "指令图"),
     ("s18_cross_group", "跨群共享"),
     ("s19_rob", "打劫系统"),
+    ("s20_sync", "竞猜同步"),
 ]
 
 

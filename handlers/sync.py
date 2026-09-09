@@ -95,10 +95,15 @@ class SyncHandler:
 
     @staticmethod
     def _request_path(request) -> str:
-        """原始请求行 path（含 query，未解码），与契约签名一致。"""
-        path = request.raw_path
+        """原始请求行 path（含 query，未解码），与契约签名一致。
+
+        aiohttp 的 raw_path 即原始 request target，已含 query；仅在缺失时补拼。
+        """
+        raw = request.raw_path
+        if "?" in raw:
+            return raw
         qs = request.query_string
-        return f"{path}?{qs}" if qs else path
+        return f"{raw}?{qs}" if qs else raw
 
     def _verify_request(self, request, body: bytes) -> bool:
         secret = str(self._cfg("sync_secret") or "").strip()

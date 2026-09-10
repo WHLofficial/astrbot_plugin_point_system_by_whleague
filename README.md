@@ -256,7 +256,7 @@ whl抽奖
 2. `sync_report_groups` 填战报目标群号；`sync_platform_id` 填消息平台实例 id（WebUI 消息平台页可查）
 3. 服务器上用 cloudflared 把公网域名指到本机端口：`cloudflared tunnel` 规则 `astrbot.whleague.win → http://127.0.0.1:9991`，竞猜系统 `SYNC_BASE_URL` 配 `https://astrbot.whleague.win`
 4. 验证：`curl https://astrbot.whleague.win/sync/summary` 应返回 `401 {"error":"bad sign"}`（说明服务可达且验签生效）
-5. 排查「127.0.0.1:9991 连不上」：先确认 WebUI 里 `sync_enabled` 已开且 `sync_secret` 非空——只开开关不填密钥时插件会打 `[sync] sync_enabled 已开启但 sync_secret 为空，同步不生效` 并跳过启动，此端口不存在，Tunnel 无端口可转发，竞猜系统对账页会显示「插件不可达」。日志检索用 `[sync]` 前缀，启动成功行是 `[sync] http server listening on 127.0.0.1:9991`
+5. 排查「127.0.0.1:9991 连不上」：先确认 WebUI 里 `sync_enabled` 已开且 `sync_secret` 非空——只开开关不填密钥时插件会打 `[sync] sync_enabled 已开启但 sync_secret 为空，同步不生效` 并跳过启动，此端口不存在，Tunnel 无端口可转发，竞猜系统对账页会显示「插件不可达」。日志检索用 `[sync]` 前缀，启动成功行是 `[sync] http server listening on 127.0.0.1:9991`。若公网地址返回 `530` 且正文为 `error code: 1033`，是 Cloudflare 边缘找不到已连接的隧道（cloudflared 未运行），与插件无关，需先拉起隧道再验证
 
 > 安全：`sync_secret` 只存 AstrBot 托管配置，不进任何 git 仓库、不打日志；HTTP 仅监听 `127.0.0.1`，由 Tunnel 对外暴露；所有端点先验签。
 

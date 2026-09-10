@@ -350,7 +350,7 @@
   },
   "sync_listen_host": {
     "description": "同步服务监听地址",
-    "hint": "HTTP 服务监听地址。必须保持 127.0.0.1，由 cloudflared Tunnel 对外暴露，切勿直接监听 0.0.0.0。",
+    "hint": "HTTP 服务监听地址。宿主机直装时保持 127.0.0.1，由 cloudflared Tunnel 对外暴露。若 AstrBot 跑在 Docker 容器中且未用 network_mode: host（即独立网络栈），容器内的 127.0.0.1 与宿主机的是两套独立网络栈，宿主机与 cloudflared 都够不到，须改为 0.0.0.0 并在宿主机侧仅把端口发布到回环（ports: [\"127.0.0.1:9991:9991\"]）。无论哪种方式都不得让该端口直接暴露到公网。",
     "type": "string",
     "default": "127.0.0.1"
   },

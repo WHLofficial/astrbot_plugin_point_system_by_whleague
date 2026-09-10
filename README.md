@@ -257,8 +257,9 @@ whl抽奖
 3. 服务器上用 cloudflared 把公网域名指到本机端口：`cloudflared tunnel` 规则 `astrbot.whleague.win → http://127.0.0.1:9991`，竞猜系统 `SYNC_BASE_URL` 配 `https://astrbot.whleague.win`
 4. 验证：`curl https://astrbot.whleague.win/sync/summary` 应返回 `401 {"error":"bad sign"}`（说明服务可达且验签生效）
 5. 排查「127.0.0.1:9991 连不上」：先确认 WebUI 里 `sync_enabled` 已开且 `sync_secret` 非空——只开开关不填密钥时插件会打 `[sync] sync_enabled 已开启但 sync_secret 为空，同步不生效` 并跳过启动，此端口不存在，Tunnel 无端口可转发，竞猜系统对账页会显示「插件不可达」。日志检索用 `[sync]` 前缀，启动成功行是 `[sync] http server listening on 127.0.0.1:9991`。若公网地址返回 `530` 且正文为 `error code: 1033`，是 Cloudflare 边缘找不到已连接的隧道（cloudflared 未运行），与插件无关，需先拉起隧道再验证
+6. Docker 部署注意：若 AstrBot 跑在容器中且未用 `network_mode: host`（即独立网络栈），容器的 `127.0.0.1` 与宿主机的 `127.0.0.1` 是两套独立网络栈。插件绑在容器 loopback 上时会正常打印 `[sync] http server listening on 127.0.0.1:9991`（该行在 `site.start()` 成功后才打印，绑失败会打 `failed to listen`），但宿主机上 `curl 127.0.0.1:9991` 会被**立即拒绝**（0 ms，不是超时），cloudflared 也转发不到。此时须把 `sync_listen_host` 改为 `0.0.0.0`（在容器内绑定），并在宿主机侧只发布到回环：`ports: ["127.0.0.1:9991:9991"]`。注意仅靠 `-p` 不改监听地址是无效的——Docker 端口发布的目标是容器的 eth0 地址而非其 loopback，绑在容器 loopback 上的服务发布出去仍然够不到。若 cloudflared 与该容器在同一 compose 网络，也可不发布端口，直接让 Tunnel 指向 `http://<容器名>:9991`
 
-> 安全：`sync_secret` 只存 AstrBot 托管配置，不进任何 git 仓库、不打日志；HTTP 仅监听 `127.0.0.1`，由 Tunnel 对外暴露；所有端点先验签。
+> 安全：`sync_secret` 只存 AstrBot 托管配置，不进任何 git 仓库、不打日志；HTTP 默认仅监听 `127.0.0.1`，由 Tunnel 对外暴露；所有端点先验签。容器部署按第 6 条监听 `0.0.0.0` 时，须由宿主机侧的端口发布把可达范围限制在回环，不得暴露到公网。
 
 ### 本地联调
 

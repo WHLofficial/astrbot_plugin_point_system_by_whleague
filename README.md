@@ -246,7 +246,7 @@ whl抽奖
 与 WHL 竞猜系统（[WHL-Daily-Activities-System](https://github.com/WHLofficial/WHL-Daily-Activities-System)）对接，插件作为**积分真源**：
 
 - **入账**：竞猜系统发放奖励/冲正时 POST `/sync/credit` 到本插件（HMAC-SHA256 验签，±300 秒时间窗），按 `payout_id` 幂等入账；与 `sync_ledger` 流水同事务写入，冲正余额不足时回滚返回 409
-- **对账**：竞猜系统每日定时 GET `/sync/summary?date=YYYY-MM-DD`，按东八区日期返回各 QQ 净额（含冲正负数）
+- **对账**：竞猜系统每日定时 GET `/sync/summary?date=YYYY-MM-DD`，按东八区日期返回各 QQ 净额（含冲正负数）。响应形如 `{"date":"YYYY-MM-DD","items":[{"qq_id":"<QQ>","total":<净额>}]}`；`total` 为当日净额，含冲正负数、可为负，**无 `count` 字段**。该字段名是对账接口的既定形状，**不要改名**（改名会导致竞猜系统每日对账取不到实发数据）
 - **绑定**：用户在竞猜网页生成 10 分钟一次性码后，群内发送「**绑定 <码>**」完成 QQ ↔ 竞猜账号绑定（群聊裸发或带 `/` 前缀均可触发）
 - **战报**：插件每分钟轮询竞猜系统待发战报，原样转发到 `sync_report_groups` 配置的群，**全部群发送成功才**确认（ack）；失败下轮重拉
 
@@ -256,6 +256,7 @@ whl抽奖
 2. `sync_report_groups` 填战报目标群号；`sync_platform_id` 填消息平台实例 id（WebUI 消息平台页可查）
 3. 服务器上用 cloudflared 把公网域名指到本机端口：`cloudflared tunnel` 规则 `astrbot.whleague.win → http://127.0.0.1:9991`，竞猜系统 `SYNC_BASE_URL` 配 `https://astrbot.whleague.win`
 4. 验证：`curl https://astrbot.whleague.win/sync/summary` 应返回 `401 {"error":"bad sign"}`（说明服务可达且验签生效）
+5. 排查「127.0.0.1:9991 连不上」：先确认 WebUI 里 `sync_enabled` 已开且 `sync_secret` 非空——只开开关不填密钥时插件会打 `[sync] sync_enabled 已开启但 sync_secret 为空，同步不生效` 并跳过启动，此端口不存在，Tunnel 无端口可转发，竞猜系统对账页会显示「插件不可达」。日志检索用 `[sync]` 前缀，启动成功行是 `[sync] http server listening on 127.0.0.1:9991`
 
 > 安全：`sync_secret` 只存 AstrBot 托管配置，不进任何 git 仓库、不打日志；HTTP 仅监听 `127.0.0.1`，由 Tunnel 对外暴露；所有端点先验签。
 

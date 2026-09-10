@@ -5,32 +5,15 @@ import aiosqlite
 
 from astrbot.api import logger
 
+from ..utils.astrbot_paths import get_plugin_data_dir
+
 _RETRY_COUNT = 3
 _RETRY_DELAY = 0.05
 
 
 def _default_db_path() -> str:
-    """Resolve the plugin database path.
-
-    Prefers the AstrBot plugin data directory; falls back to the AstrBot
-    data directory, then the current working directory, so the plugin
-    works both inside AstrBot and standalone.
-    """
-    base = None
-    try:
-        from astrbot.core.utils.astrbot_path import get_astrbot_plugin_data_path
-
-        base = get_astrbot_plugin_data_path()
-    except Exception:
-        try:
-            from astrbot.core.utils.astrbot_path import get_astrbot_data_path
-
-            base = get_astrbot_data_path()
-        except Exception:
-            base = os.getcwd()
-    base = os.path.join(base, "astrbot_plugin_point_system_by_whleague")
-    os.makedirs(base, exist_ok=True)
-    return os.path.join(base, "points_system.db")
+    """Resolve the plugin database path inside the plugin data directory."""
+    return os.path.join(get_plugin_data_dir(), "points_system.db")
 
 
 class DatabaseManager:

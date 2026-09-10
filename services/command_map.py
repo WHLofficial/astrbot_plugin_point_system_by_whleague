@@ -18,6 +18,7 @@ from pathlib import Path
 from astrbot.api import logger
 
 from ..config import defaults as _cfg_defaults
+from ..utils.astrbot_paths import get_plugin_data_dir
 
 _CACHE_TTL = 86400.0
 """Default cache entry lifetime in seconds (24h)."""
@@ -439,19 +440,7 @@ def cache_signature(data: dict) -> str:
 
 def cache_dir() -> Path:
     """Resolve the command map cache directory under the plugin data path."""
-    base = None
-    try:
-        from astrbot.core.utils.astrbot_path import get_astrbot_plugin_data_path
-
-        base = get_astrbot_plugin_data_path()
-    except Exception:
-        try:
-            from astrbot.core.utils.astrbot_path import get_astrbot_data_path
-
-            base = get_astrbot_data_path()
-        except Exception:
-            base = os.getcwd()
-    return Path(base) / "astrbot_plugin_point_system_by_whleague" / "command_map"
+    return Path(get_plugin_data_dir()) / "command_map"
 
 
 class CommandMapCache:

@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.6.1 (2026-09-10)
+
+### 变更
+
+- **适配 AstrBot 4.28.0（核验通过，无硬性不兼容项，本次为加固）**：
+  - 移除已废弃的 `@register` 装饰器（自 AstrBot 2025-07-04 起发 `DeprecationWarning` 且标注未来移除），改由 `Star` 子类自动注册；`metadata.yaml` 已含 name/display_name/desc/version/author/repo/support_platforms 全部字段，加载不再产生该告警
+  - `metadata.yaml` 版本门禁由 `">=4"` 收紧为 `">=4,<5"`：仍放行整个 4.x，同时防止将来 5.x 被静默加载
+  - `sync_secret` 启用 AstrBot 4.28.0 新增的 `"secret": true` 掩码，WebUI 中该 HMAC 通信密钥不再明文显示（仅影响展示，插件读取与验签取值不变）
+  - 新增 `utils/astrbot_paths.py` 集中封装私有模块 `astrbot.core.utils.astrbot_path` 的导入（保留「插件数据目录 → AstrBot 数据目录 → `ASTRBOT_ROOT` → cwd」回退链），`db/connection.py` 与 `services/command_map.py` 两处消费方改用它，降低核心重构导致的路径风险并消除重复代码
+- 版本号 0.6.0 → 0.6.1（`metadata.yaml` 与 `config/defaults.py` 同步）
+
+### 测试
+
+- 新增 s21 套件「AstrBot 4.28.0 适配守卫」：静态面（版本门禁覆盖 4.26.8~4.28.0 且封顶 5.x、`@register` 已移除、私有 core 路径导入仅允许出现在 shim、schema 类型全部受支持且 `sync_secret` 已掩码、全插件 astrbot API 用法白名单）本机零依赖运行；真实面（真实 AstrBot 下 Star 自动注册、handler 进注册表、版本门禁、`initialize`/`terminate` 生命周期，`ASTRBOT_ROOT` 隔离数据目录）在核心依赖齐备时执行，否则优雅跳过
+- 测试套件由 215 项扩充至 221 项，套件数 20 → 21
+
 ## v0.6.0 (2026-09-09)
 
 ### 新功能

@@ -7,12 +7,11 @@ from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageChain, MessageEventResult, filter
 from astrbot.api.event.filter import EventMessageType
 from astrbot.api.platform import MessageType
-from astrbot.api.star import Context, Star, register
+from astrbot.api.star import Context, Star
 
 from .config.defaults import (
     _LIST_KEYS,
     DEFAULT_CONFIG,
-    PLUGIN_VERSION,
     parse_keyword_list,
 )
 from .db.connection import DatabaseManager
@@ -28,12 +27,6 @@ from .utils.keyword_matcher import (
 from .utils.rate_limiter import RateLimiter
 
 
-@register(
-    "points_system",
-    "WHLofficial",
-    "\u79ef\u5206\u7cfb\u7edf\u63d2\u4ef6\uff1a\u7b7e\u5230/\u62bd\u5956/\u5151\u6362/\u6392\u884c/\u751f\u65e5\u7b49",
-    PLUGIN_VERSION,
-)
 class PointSystemPlugin(Star):
     def __init__(self, context: Context, config: dict | None = None):
         super().__init__(context)

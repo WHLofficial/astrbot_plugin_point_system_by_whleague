@@ -298,12 +298,14 @@ cp -r astrbot_plugin_point_system_by_whleague AstrBot/data/plugins/
 
 ### 运行测试
 
-插件内置零依赖测试套件（**215 项**功能/并发/安全/稳定性/压力测试 + 性能基准，覆盖 20 个套件：功能正确性、并发竞态、安全、性能、稳定性、彩蛋/日期奖励、生日、活跃奖励、管理指令、handler 层、服务/DAO、工具/配置、限流器、备份恢复、迁移、压力/浸泡/随机化、指令图、跨群共享、打劫系统、竞猜同步），全部在临时库上运行，不触碰生产数据：
+插件内置零依赖测试套件（**221 项**功能/并发/安全/稳定性/压力测试 + 性能基准，覆盖 21 个套件：功能正确性、并发竞态、安全、性能、稳定性、彩蛋/日期奖励、生日、活跃奖励、管理指令、handler 层、服务/DAO、工具/配置、限流器、备份恢复、迁移、压力/浸泡/随机化、指令图、跨群共享、打劫系统、竞猜同步、AstrBot 4.28.0 适配守卫），全部在临时库上运行，不触碰生产数据：
 
 ```bash
 cd AstrBot/data/plugins/astrbot_plugin_point_system_by_whleague
 python -m tests.run_all
 ```
+
+其中 `s21_host_compat` 分两层：静态面（版本门禁 / `@register` 废弃项 / 私有 core 导入收敛 / schema 类型与密钥掩码 / astrbot API 白名单）无需宿主依赖即可运行；真实面（真实 AstrBot 下自动注册、handler 进注册表、版本门禁、`initialize`/`terminate` 生命周期）在检测到完整核心依赖时才执行，否则自动跳过。真实面会真实建库，测试框架自动把 `ASTRBOT_ROOT` 指向临时目录以隔离插件数据；若手工直接运行 `tests/host_smoke_child.py`，必须自行设置 `ASTRBOT_ROOT`（未设置时脚本直接拒绝运行），以免触碰生产 `data/plugin_data/points_system.db`。
 
 ## 更新日志
 

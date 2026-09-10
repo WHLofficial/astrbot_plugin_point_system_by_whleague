@@ -46,6 +46,7 @@ SUITES = [
     ("s18_cross_group", "跨群共享"),
     ("s19_rob", "打劫系统"),
     ("s20_sync", "竞猜同步"),
+    ("s21_host_compat", "AstrBot 4.28.0 适配守卫"),
 ]
 
 

@@ -339,7 +339,8 @@
     "description": "同步通信密钥 SYNC_SECRET",
     "hint": "与竞猜系统 .prod-secrets.txt 中 SYNC_SECRET 一致。仅存于 AstrBot 配置，请勿提交到任何 git 仓库或贴到日志/群里。留空则同步功能不生效。",
     "type": "string",
-    "default": ""
+    "default": "",
+    "secret": true
   },
   "sync_base_url": {
     "hint": "竞猜系统对外地址，例如 https://guess.whleague.win（本地联调用 http://127.0.0.1:8789）。插件用它调用绑定核销、战报拉取/确认接口。",

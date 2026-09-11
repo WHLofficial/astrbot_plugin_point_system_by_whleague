@@ -11,6 +11,8 @@ _RANKING_KEYWORDS = ("排行", "排名", "积分榜")
 
 _MY_POINTS_KEYWORDS = ("我的积分", "积分查询")
 
+_MY_SPEAK_KEYWORDS = ("我的发言", "发言统计")
+
 
 def _normalize_keywords(keywords) -> list:
     if isinstance(keywords, str):
@@ -66,6 +68,13 @@ def is_my_points_message(text: str) -> bool:
     if not text:
         return False
     return any(_equals(text, kw) for kw in _MY_POINTS_KEYWORDS)
+
+
+def is_my_speak_message(text: str) -> bool:
+    """我的发言触发判定：消息严格等于 我的发言/发言统计 之一。"""
+    if not text:
+        return False
+    return any(_equals(text, kw) for kw in _MY_SPEAK_KEYWORDS)
 
 
 def parse_rob_message(components, rob_keywords, self_qq) -> dict:

@@ -574,6 +574,10 @@ async def test_admin_global_clear_flow():
         await t.dao.add_item("商品", 10, 1)
         await t.dao.add_date_reward("01-01", None, "元旦", 5, 1.0)
         await t.dao.add_admin("gadmin", "owner", "1")
+        await t.db.execute(
+            "INSERT INTO speak_daily (qq, group_id, stat_date, msg_count) "
+            "VALUES ('1002','1','2026-09-01',3)"
+        )
 
         bot = FakeBot(member_card="现名片")
         ev = FakeEvent("root", "1", is_admin=True, msg="/清空全部数据", bot=bot)
@@ -589,6 +593,7 @@ async def test_admin_global_clear_flow():
         assert await t.count("date_rewards") == 0
         assert await t.count("admins") == 0
         assert await t.count("point_transactions") == 0
+        assert await t.count("speak_daily") == 0
         # 彩蛋事件重种为默认 2 条
         assert await t.count("easter_events") == 2
         # 清空前备份文件存在

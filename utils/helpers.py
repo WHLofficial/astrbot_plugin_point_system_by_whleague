@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 _DEFAULT_BOUNDARY = (4, 0)
 _day_boundary = _DEFAULT_BOUNDARY
@@ -64,3 +64,39 @@ async def generate_record_no(conn, date_prefix: str | None = None) -> str:
         row = await cur.fetchone()
     count = row[0] if row else 0
     return f"{prefix}{count + 1:04d}"
+
+
+def week_start_str() -> str:
+    """当前业务日所在周（周一为起点）的周一，YYYY-MM-DD。"""
+    day = _shifted_now().date()
+    return (day - timedelta(days=day.weekday())).isoformat()
+
+
+def month_bounds(offset: int = 0) -> tuple[str, str]:
+    """当前业务日所在自然月的首末业务日，YYYY-MM-DD。
+
+    offset=0 为本月，-1 为上月，依此类推（可跨年）。
+    """
+    day = _shifted_now().date()
+    year, month = day.year, day.month + offset
+    year += (month - 1) // 12
+    month = (month - 1) % 12 + 1
+    first = date(year, month, 1)
+    nxt = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
+    return first.isoformat(), (nxt - timedelta(days=1)).isoformat()
+
+
+def consecutive_day_streak(date_strs, end_date: str) -> int:
+    """从 end_date 起往回数的连续日历天数。
+
+    end_date 当天没有记录时从次日往回算起——当天还没过完，连续不应被判为中断。
+    """
+    days = set(date_strs)
+    cur = date.fromisoformat(end_date)
+    if cur.isoformat() not in days:
+        cur -= timedelta(days=1)
+    streak = 0
+    while cur.isoformat() in days:
+        streak += 1
+        cur -= timedelta(days=1)
+    return streak

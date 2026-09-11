@@ -183,6 +183,44 @@ async def test_import_surface_allowlist():
     return f"扫描 {len(_plugin_py_files())} 个生产文件，astrbot API 用法全部在白名单内"
 
 
+async def test_speak_count_priority():
+    """发言计数 handler 须以正优先级注册，且是插件内唯一带优先级的 handler。
+
+    AstrBot 派发链（star_request）在 event.is_stopped() 后中断后续 handler，
+    而签到/抽奖/排行/我的积分/我的发言/打劫这 6 个无前缀触发 handler 命中后都会
+    stop_event。计数若与它们同为默认优先级 0、注册顺序又在其后，指令消息就漏计数。
+    """
+    src = _read(os.path.join(PLUGIN_ROOT, "main.py"))
+    lines = src.splitlines()
+
+    def _next_def(idx):
+        for nxt in lines[idx + 1 :]:
+            m = re.match(r"\s*async def (\w+)", nxt)
+            if m:
+                return m.group(1)
+        return None
+
+    prioritized = {}
+    for i, line in enumerate(lines):
+        m = re.match(r"\s*@filter\.\w+\(.*\bpriority\s*=\s*(-?\d+)", line)
+        if m:
+            prioritized[_next_def(i)] = int(m.group(1))
+    assert set(prioritized) == {"on_group_message_count"}, (
+        f"只有计数 handler 该带优先级，实际: {prioritized}"
+    )
+    assert prioritized["on_group_message_count"] > 0, prioritized
+
+    # 计数与活跃奖励已拆成两个入口：计数只计数，奖励入口不得再碰计数
+    count_body = src[src.index("async def on_group_message_count"): src.index("async def on_group_message(")]
+    assert "await self.speak_stat_handler.handle(event)" in count_body, count_body
+    m = re.search(r"async def on_group_message\(.*?\n(.*?)(?=\n    @|\Z)", src, re.S)
+    assert m, "未找到 on_group_message 函数体"
+    reward_body = m.group(1)
+    assert "speak_stat_handler" not in reward_body, reward_body
+    assert "await self.active_reward_handler.handle(event)" in reward_body, reward_body
+    return "计数 handler 唯一带正优先级（priority>0），命中 stop_event 的触发指令也照样计数"
+
+
 async def test_real_host_load():
     """真实 AstrBot 宿主加载冒烟（子进程；核心依赖缺失时跳过）。"""
     child = os.path.join(PLUGIN_ROOT, "tests", "host_smoke_child.py")
@@ -224,5 +262,6 @@ TESTS = [
     ("私有 core 路径导入已收敛", test_no_private_core_imports),
     ("配置 schema 与密钥掩码兼容", test_schema_host_compat),
     ("astrbot API 用法白名单", test_import_surface_allowlist),
+    ("发言计数 handler 优先级契约", test_speak_count_priority),
     ("真实宿主加载冒烟（可跳过）", test_real_host_load),
 ]

@@ -1,6 +1,6 @@
 from astrbot.api import logger
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 SQL_CREATE_TABLES = r"""
 
@@ -220,6 +220,23 @@ CREATE TABLE IF NOT EXISTS sync_ledger (
 
 CREATE INDEX IF NOT EXISTS idx_sync_ledger_qq ON sync_ledger(qq_id);
 CREATE INDEX IF NOT EXISTS idx_sync_ledger_date ON sync_ledger(credited_at);
+
+-- 发言统计：按 (QQ, 群, 业务日) 一行，msg_count 为该日累计条数。
+-- stat_date 是业务日（受 signin_refresh_time 边界影响），不是自然日。
+-- updated_at 兼职「该行最近一次发言时刻」，同日重复发言会刷新它。
+CREATE TABLE IF NOT EXISTS speak_daily (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    qq TEXT NOT NULL,
+    group_id TEXT NOT NULL,
+    stat_date TEXT NOT NULL,
+    msg_count INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    UNIQUE(qq, group_id, stat_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_speak_daily_group_date ON speak_daily(group_id, stat_date);
+CREATE INDEX IF NOT EXISTS idx_speak_daily_qq_date ON speak_daily(qq, stat_date);
 
 """
 

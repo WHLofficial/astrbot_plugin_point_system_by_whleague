@@ -842,19 +842,33 @@ async def test_main_routes():
         assert any("用法" in m for m in msgs)
         msgs = await collect(obj.cmd_verify(FakeEvent("u1", "G1", msg="/核销 通过")))
         assert any("用法" in m for m in msgs)
-        # on_group_message 委托 active_reward_handler
+        # 计数与活跃奖励拆成两个入口：计数单独注册（priority>0，最先执行），
+        # 否则会被前面 6 个调 stop_event 的无前缀触发 handler 截断
         class _ActiveRecorder:
-            def __init__(self):
+            def __init__(self, tag="reward"):
+                self.tag = tag
                 self.calls = []
 
             async def handle(self, event):
                 self.calls.append(event)
                 return None
 
-        obj.active_reward_handler = _ActiveRecorder()
+        hook_order = []
+
+        class _OrderRecorder(_ActiveRecorder):
+            async def handle(self, event):
+                hook_order.append(self.tag)
+                return await super().handle(event)
+
+        obj.speak_stat_handler = _OrderRecorder("speak")
+        obj.active_reward_handler = _OrderRecorder()
         ev3 = FakeEvent("u1", "G1", msg="普通群消息")
+        await obj.on_group_message_count(ev3)
+        assert obj.speak_stat_handler.calls == [ev3]
+        assert obj.active_reward_handler.calls == []
         await obj.on_group_message(ev3)
         assert obj.active_reward_handler.calls == [ev3]
+        assert hook_order == ["speak", "reward"]
         # _cron_backup 委托 backup_service.run_backup
         class _BackupRecorder:
             def __init__(self):

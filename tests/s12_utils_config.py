@@ -242,6 +242,7 @@ async def test_keyword_matcher_strict():
     from astrbot_plugin_point_system_by_whleague.utils.keyword_matcher import (
         is_lottery_message,
         is_my_points_message,
+        is_my_speak_message,
         is_ranking_message,
         is_signin_message,
     )
@@ -280,7 +281,13 @@ async def test_keyword_matcher_strict():
     assert is_my_points_message(" 我的积分 ")
     for bad in ("查我的积分", "我的积分！", "积分查询一下", "查积分", "积分", "my points"):
         assert not is_my_points_message(bad), bad
-    return "关键词严格匹配：四功能边界/大小写/空白/附加文本全部正确"
+    # 我的发言
+    assert is_my_speak_message("我的发言")
+    assert is_my_speak_message("发言统计")
+    assert is_my_speak_message(" 我的发言 ")
+    for bad in ("查我的发言", "我的发言！", "我的发言记录", "发言统计一下", "发言"):
+        assert not is_my_speak_message(bad), bad
+    return "关键词严格匹配：五功能边界/大小写/空白/附加文本全部正确"
 
 
 async def test_lottery_tiers_fallback_and_limits():

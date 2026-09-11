@@ -91,6 +91,39 @@ def _check_version_gate() -> None:
     print(f"version gate OK: {spec} covers {astrbot.__version__}")
 
 
+def _check_dispatch_order() -> None:
+    """发言计数 handler 必须排在所有会 stop_event 的无前缀触发 handler 之前。
+
+    AstrBot 的 star_request 阶段遇到 event.is_stopped() 即中断后续 handler，
+    计数若与触发 handler 同优先级（注册顺序又在其后）就会漏掉指令消息。
+    注册表按 -priority 稳定排序，此处直接断言真实排序结果。
+    """
+    handlers = star_handlers_registry.get_handlers_by_module_name(MODULE)
+    order = {h.handler_name: i for i, h in enumerate(handlers)}
+    count_name = "on_group_message_count"
+    assert count_name in order, f"{count_name} not registered: {sorted(order)}"
+    priority = handlers[order[count_name]].extras_configs.get("priority", 0)
+    assert priority > 0, f"{count_name} priority must be > 0, got {priority}"
+    triggers = (
+        "on_sign_in",
+        "on_lottery",
+        "on_ranking",
+        "on_my_points",
+        "on_my_speak",
+        "on_rob",
+    )
+    for name in triggers:
+        assert name in order, f"{name} not registered: {sorted(order)}"
+        assert order[count_name] < order[name], (
+            f"{count_name} must dispatch before {name}: priority={priority} "
+            f"positions={order[count_name]} vs {order[name]}"
+        )
+    print(
+        f"dispatch order OK: {count_name}(priority={priority}) "
+        f"precedes {len(triggers)} stop_event handlers"
+    )
+
+
 class _Cron:
     """最小 cron 管理器替身（真实实现需完整核心生命周期，此处只验证调用契约）。"""
 
@@ -132,6 +165,7 @@ async def _lifecycle() -> None:
 
 _check_autoregister()
 _check_version_gate()
+_check_dispatch_order()
 asyncio.run(_lifecycle())
 print("lifecycle OK: initialize/terminate completed")
 print("REAL HOST LOAD OK")

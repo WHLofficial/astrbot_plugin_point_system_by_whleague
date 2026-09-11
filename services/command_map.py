@@ -60,6 +60,12 @@ _COMMAND_SECTIONS = [
             },
             {
                 "trigger": "keyword",
+                "name": "我的发言 / 发言统计",
+                "usage": "我的发言",
+                "desc": "查询我的今日 / 本周 / 本月 / 上月 / 累计发言数、本群排名、发言称号与活跃轨迹",
+            },
+            {
+                "trigger": "keyword",
                 "name": "{rob_kw} @目标",
                 "usage": "打劫 @目标",
                 "desc": "打劫群友抢积分，失败扣成本",

@@ -17,10 +17,12 @@ from .config.defaults import (
 from .db.connection import DatabaseManager
 from .db.dao import PointDAO
 from .db.schema import init_schema
+from .db.speak_dao import SpeakDAO
 from .utils.helpers import set_day_boundary, today_str
 from .utils.keyword_matcher import (
     is_lottery_message,
     is_my_points_message,
+    is_my_speak_message,
     is_ranking_message,
     is_signin_message,
 )
@@ -38,6 +40,7 @@ class PointSystemPlugin(Star):
         await self.db.init()
 
         self.dao = PointDAO(self.db)
+        self.speak_dao = SpeakDAO(self.db)
 
         await init_schema(self.db)
 
@@ -103,6 +106,7 @@ class PointSystemPlugin(Star):
         from .handlers.redeem import RedeemHandler
         from .handlers.rob import RobHandler
         from .handlers.sign_in import SignInHandler
+        from .handlers.speak_stat import SpeakStatHandler
 
         self.sign_in_handler = SignInHandler(self)
         self.lottery_handler = LotteryHandler(self)
@@ -113,6 +117,7 @@ class PointSystemPlugin(Star):
         self.active_reward_handler = ActiveRewardHandler(self)
         self.my_points_handler = MyPointsHandler(self)
         self.rob_handler = RobHandler(self)
+        self.speak_stat_handler = SpeakStatHandler(self)
 
         from .handlers.command_map import CommandMapHandler
 
@@ -473,6 +478,24 @@ class PointSystemPlugin(Star):
             event.stop_event()
 
     # ═══════════════════════════════════════════════════════════
+    # Handlers: My Speak Stat
+    # ═══════════════════════════════════════════════════════════
+
+    @filter.regex(r"\u6211\u7684\u53d1\u8a00|\u53d1\u8a00\u7edf\u8ba1")
+    async def on_my_speak(
+        self, event: AstrMessageEvent
+    ) -> AsyncGenerator[MessageEventResult, None]:
+        # 严格匹配触发：消息必须完全等于 我的发言/发言统计
+        if not is_my_speak_message(event.get_message_str()):
+            return
+        produced = False
+        async for result in self.speak_stat_handler.handle_query(event):
+            produced = True
+            yield result
+        if produced:
+            event.stop_event()
+
+    # ═══════════════════════════════════════════════════════════
     # Handlers: Rob
     # ═══════════════════════════════════════════════════════════
 
@@ -805,8 +828,16 @@ class PointSystemPlugin(Star):
         yield event.plain_result("\n".join(lines))
 
     # ═══════════════════════════════════════════════════════════
-    # Handlers: Active reward (intercepts all group messages)
+    # Handlers: Group message fanout (speak stat + active reward)
     # ═══════════════════════════════════════════════════════════
+
+    # 计数必须用高优先级独立注册：签到/抽奖/排行/我的积分/我的发言/打劫等无前缀
+    # 触发 handler 命中后会调 event.stop_event()，AstrBot 的 star_request 阶段随即
+    # 中断后续 handler——计数若与它们同为默认优先级 0（注册顺序还在它们之后）就会
+    # 漏掉「签到」这类指令消息。计数无输出、不 stop_event，提前执行无副作用。
+    @filter.event_message_type(EventMessageType.GROUP_MESSAGE, priority=100)
+    async def on_group_message_count(self, event: AstrMessageEvent) -> None:
+        await self.speak_stat_handler.handle(event)
 
     @filter.event_message_type(EventMessageType.GROUP_MESSAGE)
     async def on_group_message(self, event: AstrMessageEvent) -> None:

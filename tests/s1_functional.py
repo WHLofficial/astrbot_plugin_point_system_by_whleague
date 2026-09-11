@@ -606,6 +606,10 @@ async def test_clear_feature_regression():
         await t.db.execute(
             "INSERT INTO users (qq, group_id) VALUES ('u1','G1')"
         )
+        await t.db.execute(
+            "INSERT INTO speak_daily (qq, group_id, stat_date, msg_count) "
+            "VALUES ('u1','G1','2026-09-01',5)"
+        )
         ev = FakeEvent("admin", "G1", is_admin=True)
         msgs = await collect(handler.clear_data(ev, "group"))
         assert any("/确认清空" in m for m in msgs)
@@ -613,8 +617,9 @@ async def test_clear_feature_regression():
         ev2 = FakeEvent("admin", "G1", is_admin=True, msg=f"/确认清空 {token}")
         msgs = await collect(handler.confirm_clear(ev2))
         assert any("已清空本群数据" in m for m in msgs)
-        # 群清空：成员积分归零、成员关系保留
+        # 群清空：成员积分归零、成员关系保留、发言统计一并清除
         assert await t.count("users") == 1
+        assert await t.count("speak_daily") == 0
         row = await t.db.fetchone("SELECT points FROM accounts WHERE qq='u1'")
         assert row["points"] == 0
         # 权限

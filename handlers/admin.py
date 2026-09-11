@@ -44,6 +44,7 @@ _GROUP_CLEAR_TABLES = (
     "lottery_record",
     "point_transactions",
     "birthday_announce_log",
+    "speak_daily",
 )
 _GLOBAL_CLEAR_TABLES = (
     "daily_keyword_claim",
@@ -57,6 +58,7 @@ _GLOBAL_CLEAR_TABLES = (
     "date_rewards",
     "admins",
     "easter_events",
+    "speak_daily",
     "users",
     "accounts",
 )

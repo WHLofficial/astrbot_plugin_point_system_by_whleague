@@ -364,6 +364,33 @@ async def test_lottery_draw_bad_tiers_runtime():
     return "抽奖：坏 tiers 配置返回明确错误消息"
 
 
+async def test_speak_milestones_config():
+    """schema 默认档位 → 可播报档位；默认文案按占位符渲染。"""
+    from astrbot_plugin_point_system_by_whleague.config.defaults import DEFAULT_CONFIG
+    from astrbot_plugin_point_system_by_whleague.utils.speak_milestones import (
+        DEFAULT_TEMPLATE,
+        parse_milestones,
+        render_milestone,
+    )
+
+    tiers = parse_milestones(DEFAULT_CONFIG["speak_stat_titles"])
+    # 默认 7 档里去掉最低档（阈值 1）后剩 6 档，升序
+    assert len(tiers) == 6
+    assert [t for t, _ in tiers] == [20, 100, 400, 1200, 4000, 12000]
+    # 配置缺失/非法时整表回退内置默认档位，同样跳过最低档
+    assert parse_milestones(None) == tiers
+    assert parse_milestones([]) == tiers
+    assert parse_milestones(["nope"]) == tiers
+    expected = (
+        DEFAULT_TEMPLATE.replace("{total}", "100")
+        .replace("{title}", "T")
+        .replace("{rank}", "2")
+    )
+    assert render_milestone(DEFAULT_TEMPLATE, total=100, title="T", rank=2) == expected
+    assert render_milestone(None, total=100, title="T", rank=2) == expected
+    return "里程碑档位：默认配置解析为 6 档（跳最低档），非法配置整表回退；默认文案渲染"
+
+
 TESTS = [
     ("parse_keyword_list", test_parse_keyword_list),
     ("day_boundary_parse", test_day_boundary_parse),
@@ -377,4 +404,5 @@ TESTS = [
     ("keyword_matcher_strict", test_keyword_matcher_strict),
     ("lottery_tiers_fallback_limits", test_lottery_tiers_fallback_and_limits),
     ("lottery_draw_bad_tiers", test_lottery_draw_bad_tiers_runtime),
+    ("speak_milestones_config", test_speak_milestones_config),
 ]

@@ -461,23 +461,23 @@ async def test_speak_schema_migration():
     from astrbot_plugin_point_system_by_whleague.db.speak_dao import SpeakDAO
 
     async with TempDB() as t:
-        assert SCHEMA_VERSION == 6
-        # 模拟旧库：无 speak_daily 表、版本号为 5
+        assert SCHEMA_VERSION == 7
+        # 模拟旧库：无 speak_daily 表、版本号为 6
         await t.db.execute("DROP TABLE speak_daily")
-        await t.db.execute("UPDATE plugin_config SET value='5' WHERE key='schema_version'")
+        await t.db.execute("UPDATE plugin_config SET value='6' WHERE key='schema_version'")
         await init_schema(t.db)
 
         row = await t.db.fetchone(
             "SELECT value FROM plugin_config WHERE key='schema_version'"
         )
-        assert row["value"] == "6"
+        assert row["value"] == "7"
         dao = SpeakDAO(t.db)
         await dao.record("1001", "G1", "2026-09-11")
         assert await dao.get_total("1001", "G1") == 1
         # 幂等：重复初始化不报错、不清数据
         await init_schema(t.db)
         assert await dao.get_total("1001", "G1") == 1
-    return "发言统计：旧库（version=5）启动即建表并升到 6，无需迁移分支"
+    return "发言统计：旧库（version=6）启动即建表并升到 7，无需迁移分支"
 
 
 TESTS = [

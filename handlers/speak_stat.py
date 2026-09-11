@@ -1,7 +1,7 @@
 from collections.abc import AsyncGenerator
 
 from astrbot.api import logger
-from astrbot.api.event import MessageEventResult
+from astrbot.api.event import MessageChain, MessageEventResult
 
 from ..utils.group_info import fetch_member_info
 from ..utils.helpers import (
@@ -11,6 +11,10 @@ from ..utils.helpers import (
     week_start_str,
 )
 from ..utils.security import clean_display_name
+from ..utils.speak_milestones import (
+    parse_milestones,
+    render_milestone,
+)
 from ..utils.speak_titles import resolve_title
 
 
@@ -49,9 +53,36 @@ class SpeakStatHandler:
                 return
             if str(qq) == str(event.get_self_id()):
                 return
-            await self._plugin.speak_dao.record(str(qq), str(group_id), today_str())
+            milestones = None
+            if self._plugin.config_cache.get("speak_milestone_enabled"):
+                milestones = parse_milestones(
+                    self._plugin.config_cache.get("speak_stat_titles")
+                )
+            total, target = await self._plugin.speak_dao.record_and_claim(
+                str(qq), str(group_id), today_str(), milestones
+            )
+            if target is not None:
+                await self._announce_milestone(event, str(qq), str(group_id), total)
         except Exception as e:
             logger.error(f"Speak stat error for {qq}: {e}")
+
+    async def _announce_milestone(
+        self, event, qq: str, group_id: str, total: int
+    ) -> None:
+        """@ 本人播报刚跨过的档位。
+
+        档位的判定与登记已在 record_and_claim 的事务里完成，这里只负责渲染与发送。
+        """
+        titles = self._plugin.config_cache.get("speak_stat_titles")
+        rows = await self._plugin.speak_dao.get_group_ranking(group_id)
+        rank = _group_stats(rows, total)[0]
+        text = render_milestone(
+            self._plugin.config_cache.get("speak_milestone_template"),
+            total=total,
+            title=resolve_title(total, titles),
+            rank=rank,
+        )
+        await event.send(MessageChain().at(qq, qq).message(text))
 
     async def handle_query(self, event) -> AsyncGenerator[MessageEventResult, None]:
         # 先取值再进 try：异常若就出在取 id 处，兜底日志才不会二次抛错

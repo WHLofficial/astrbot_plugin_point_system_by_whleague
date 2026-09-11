@@ -48,6 +48,7 @@ SUITES = [
     ("s20_sync", "竞猜同步"),
     ("s21_host_compat", "AstrBot 4.28.0 适配守卫"),
     ("s22_speak_stat", "发言统计"),
+    ("s23_speak_milestone", "发言里程碑播报"),
 ]
 
 

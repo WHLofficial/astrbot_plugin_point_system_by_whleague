@@ -1,6 +1,6 @@
 from astrbot.api import logger
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 SQL_CREATE_TABLES = r"""
 
@@ -237,6 +237,19 @@ CREATE TABLE IF NOT EXISTS speak_daily (
 
 CREATE INDEX IF NOT EXISTS idx_speak_daily_group_date ON speak_daily(group_id, stat_date);
 CREATE INDEX IF NOT EXISTS idx_speak_daily_qq_date ON speak_daily(qq, stat_date);
+
+-- 发言里程碑播报登记：一行为一个已处理过的 (QQ, 群, 档位)，用于逐档幂等。
+-- 静默基线与正常播报登记同一张表：行存在只表示「该档已处理」，判定只看已登记的最高档。
+CREATE TABLE IF NOT EXISTS speak_milestone_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    qq TEXT NOT NULL,
+    group_id TEXT NOT NULL,
+    milestone INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    UNIQUE(qq, group_id, milestone)
+);
+
+CREATE INDEX IF NOT EXISTS idx_speak_milestone_group_qq ON speak_milestone_log(group_id, qq);
 
 """
 

@@ -834,7 +834,8 @@ class PointSystemPlugin(Star):
     # 计数必须用高优先级独立注册：签到/抽奖/排行/我的积分/我的发言/打劫等无前缀
     # 触发 handler 命中后会调 event.stop_event()，AstrBot 的 star_request 阶段随即
     # 中断后续 handler——计数若与它们同为默认优先级 0（注册顺序还在它们之后）就会
-    # 漏掉「签到」这类指令消息。计数无输出、不 stop_event，提前执行无副作用。
+    # 漏掉「签到」这类指令消息。计数本身不 stop_event；但它可能顺带发出里程碑 @
+    # 播报，所以开启该功能时，播报会先于同一条消息的指令回复出现。
     @filter.event_message_type(EventMessageType.GROUP_MESSAGE, priority=100)
     async def on_group_message_count(self, event: AstrMessageEvent) -> None:
         await self.speak_stat_handler.handle(event)

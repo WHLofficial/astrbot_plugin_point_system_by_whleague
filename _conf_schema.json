@@ -132,6 +132,18 @@
     "items": {"type": "string"},
     "default": ["1:🌱 群内新面孔", "20:💬 常驻群友", "100:🗣 话题担当", "400:🔥 聊天主力", "1200:🌊 水群之王", "4000:👑 群聊之魂", "12000:🏆 传说话痨"]
   },
+  "speak_milestone_enabled": {
+    "description": "启用发言里程碑播报",
+    "hint": "累计发言数跨过称号档位时 @ 本人在群里播报一次。档位与「发言称号档位」共用，最低的那一档不播报（人人第一条消息就命中）；一次跨多档只报最高的那一档。只播报开启之后跨过的里程碑，不会给老成员回溯补发。",
+    "type": "bool",
+    "default": false
+  },
+  "speak_milestone_template": {
+    "description": "发言里程碑播报文案",
+    "hint": "可用占位符：{total} 累计发言数、{title} 新称号、{rank} 本群排名。未知占位符原样保留；文案为空或花括号写法非法时回退内置默认文案。",
+    "type": "string",
+    "default": "🎉 恭喜达成 {total} 条发言里程碑，解锁称号「{title}」，本群第 {rank} 名！"
+  },
   "lottery_enabled": {
     "description": "启用抽奖",
     "hint": "是否开放抽奖功能。",

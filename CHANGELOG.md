@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.9.0 (2026-09-13)
+
+### 新功能
+
+- **QQ 绑定收口到统一认证中心**（配套 auth 项目 P0-8）：
+  - 新增配置 `bind_claim_url`（认证中心 BASE 地址）与 `bind_secret`（绑定通道独立密钥，**不复用**竞猜同步的 `SYNC_SECRET`——职责分离，泄漏面隔离）。`bind_claim_url` 留空时绑定指令完全沿用竞猜老路，行为与 v0.8.0 一致
+  - 配置后「绑定 <码>」的核销改走认证中心 `POST /api/bind/claim`（绑定码在认证中心网页生成）；出站签名契约不变（`X-Sign = HMAC-SHA256(secret, "METHOD|path|ts|rawBody")`），仅密钥与目标切换
+  - 新增「**解绑**」群指令（裸发或带 `/` 前缀）：调认证中心 `POST /api/identity/unbind` 解除本 QQ 的绑定，回复带「积分余额不受影响」提示；仅认证中心绑定模式下可用，未配置时提示未启用
+  - 错误文案随模式切换（绑定码无效 → 提示去认证中心/竞猜网页重新生成）；新增 `bind_moved` 错误映射（绑定已迁移到认证中心）
+  - 绑定/解绑共用 `sync_bind_cooldown` 冷却（解绑独立计数键），与既有防刷口径一致
+
+### 测试
+
+- s20 新增 `test_bind_auth_target_and_unbind`：认证中心目标切换、`bind_secret` 独立验签、解绑响应映射（成功/未绑定/未知错误）、配置不完整提示；mock 服务器新增 `/api/identity/unbind` 路由
+
 ## v0.8.0 (2026-09-11)
 
 ### 新功能

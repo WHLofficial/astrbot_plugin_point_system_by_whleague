@@ -373,6 +373,19 @@
     "type": "string",
     "default": "https://guess.whleague.win"
   },
+  "bind_claim_url": {
+    "description": "认证中心绑定地址",
+    "hint": "统一认证中心 BASE 地址，例如 https://auth.whleague.win（本地联调用 http://127.0.0.1:8792）。配置后「绑定/解绑」指令改走认证中心（绑定码在认证中心网页生成）；留空沿用竞猜系统老路。",
+    "type": "string",
+    "default": ""
+  },
+  "bind_secret": {
+    "description": "绑定通道密钥 BIND_SECRET",
+    "hint": "与认证中心的 BIND_SECRET 一致。独立密钥，不复用竞猜同步的 SYNC_SECRET（职责分离，泄漏面隔离）。仅存于 AstrBot 配置，请勿提交到任何 git 仓库或贴到日志/群里。",
+    "type": "string",
+    "default": "",
+    "secret": true
+  },
   "sync_listen_host": {
     "description": "同步服务监听地址",
     "hint": "HTTP 服务监听地址。宿主机直装时保持 127.0.0.1，由 cloudflared Tunnel 对外暴露。若 AstrBot 跑在 Docker 容器中且未用 network_mode: host（即独立网络栈），容器内的 127.0.0.1 与宿主机的是两套独立网络栈，宿主机与 cloudflared 都够不到，须改为 0.0.0.0 并在宿主机侧仅把端口发布到回环（ports: [\"127.0.0.1:9991:9991\"]）。无论哪种方式都不得让该端口直接暴露到公网。",

@@ -213,7 +213,24 @@ def _mock_app(state) -> web.Application:
         state["acked"].update(ids)
         return web.json_response({"ok": True, "acked": len(ids)})
 
+    async def unbind(request):
+        raw = await request.read()
+        ok = verify(
+            state["secret"], request.method, request.path_qs, raw,
+            request.headers.get(TS_HEADER), request.headers.get(SIGN_HEADER),
+        )
+        try:
+            body = json.loads(raw.decode("utf-8")) if raw else None
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            body = None
+        state["unbind_calls"].append({"verify": ok, "body": body})
+        if not ok:
+            return web.json_response({"error": "bad sign"}, status=401)
+        status, payload = state["unbind_queue"].pop(0)
+        return web.json_response(payload, status=status)
+
     app.router.add_post("/api/bind/claim", claim)
+    app.router.add_post("/api/identity/unbind", unbind)
     app.router.add_get("/api/reports/pending", pending)
     app.router.add_post("/api/reports/ack", ack)
     return app
@@ -225,6 +242,8 @@ async def _mock_ctx(**extra):
         "secret": SECRET,
         "bind_queue": [],
         "bind_calls": [],
+        "unbind_queue": [],
+        "unbind_calls": [],
         "pending_calls": 0,
         "reports": [],
         "ack_calls": [],
@@ -507,6 +526,57 @@ async def test_bind_disabled_and_rate_limit():
         ev2 = FakeEvent(qq="9201", group_id="123")
         texts = await collect(handler.handle_bind(ev2, "AB12-CD34"))
         assert "操作太频繁" in texts[0]
+
+
+async def test_bind_auth_target_and_unbind():
+    """统一认证 P0-8：配 bind_claim_url + bind_secret 后绑定/解绑走认证中心，
+    出站用独立 bind_secret 验签（与 SYNC_SECRET 无关）；解绑响应映射；
+    未配置完整时的提示。"""
+    bind_secret = "bindsecret-two"
+    async with TempDB() as t, _plugin_ctx(t) as (plugin, handler), _mock_ctx(secret=bind_secret) as (state, mock_base):
+        plugin.config_cache["bind_claim_url"] = mock_base
+        plugin.config_cache["bind_secret"] = bind_secret
+        # 绑定成功：出站验签（bind_secret）通过、body 形状不变
+        state["bind_queue"] = [(200, {"ok": True, "displayName": "小明"})]
+        ev = FakeEvent(qq="9300", group_id="123")
+        texts = await collect(handler.handle_bind(ev, "AB12-CD34"))
+        assert "绑定成功" in texts[0] and "小明" in texts[0], texts[0]
+        assert state["bind_calls"][0]["verify"] is True
+        assert state["bind_calls"][0]["body"] == {"code": "AB12-CD34", "qq_id": "9300"}
+        # bind_moved（目标仍是竞猜老路时的误配提示）
+        state["bind_queue"] = [(400, {"error": "bind_moved"})]
+        ev = FakeEvent(qq="9302", group_id="123")
+        texts = await collect(handler.handle_bind(ev, "AB12-CD34"))
+        assert "已迁移到统一认证中心" in texts[0], texts[0]
+        # 解绑：成功 / 未绑定 / 未知错误回退 message；出站验签用 bind_secret
+        cases = [
+            (200, {"ok": True, "displayName": "小明"}, "已解绑", "积分余额不受影响"),
+            (400, {"error": "not_bound"}, "未绑定过账号", None),
+            (400, {"error": "weird", "message": "维护中"}, "维护中", None),
+        ]
+        for i, (status, payload, *expects) in enumerate(cases):
+            state["unbind_queue"] = [(status, payload)]
+            ev = FakeEvent(qq=str(9310 + i), group_id="123")
+            texts = await collect(handler.handle_unbind(ev))
+            assert len(texts) == 1
+            for expect in filter(None, expects):
+                assert expect in texts[0], (i, texts[0])
+        assert state["unbind_calls"][0]["verify"] is True
+        assert state["unbind_calls"][0]["body"] == {"qq_id": "9310"}
+        # 认证中心地址配了但 bind_secret 空：绑定/解绑都提示配置不完整
+        plugin.config_cache["bind_secret"] = ""
+        ev = FakeEvent(qq="9320", group_id="123")
+        texts = await collect(handler.handle_bind(ev, "AB12-CD34"))
+        assert "未配置完整" in texts[0], texts[0]
+        ev = FakeEvent(qq="9321", group_id="123")
+        texts = await collect(handler.handle_unbind(ev))
+        assert "解绑功能未启用" in texts[0], texts[0]
+
+    # 完全未配 bind_claim_url：解绑指令提示未启用（独立于 sync_enabled）
+    async with TempDB() as t, _plugin_ctx(t) as (plugin, handler):
+        ev = FakeEvent(qq="9400", group_id="123")
+        texts = await collect(handler.handle_unbind(ev))
+        assert "解绑功能未启用" in texts[0], texts[0]
 
 
 # ─── 战报轮询 ──────────────────────────────────────────────

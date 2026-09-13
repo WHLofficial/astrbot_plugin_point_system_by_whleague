@@ -226,6 +226,8 @@ whl抽奖
 | sync_enabled | bool | false | 竞猜系统同步总开关 |
 | sync_secret | str | (空) | 同步通信密钥，与竞猜系统 SYNC_SECRET 一致；勿提交到 git 或外泄 |
 | sync_base_url | str | https://guess.whleague.win | 竞猜系统地址（本地联调 http://127.0.0.1:8789） |
+| bind_claim_url | str | (空) | 统一认证中心地址（如 https://auth.whleague.win）。配置后绑定/解绑指令走认证中心；留空沿用竞猜老路 |
+| bind_secret | str | (空) | 绑定通道密钥，与认证中心 BIND_SECRET 一致；独立于 SYNC_SECRET（不复用）；勿提交到 git 或外泄 |
 | sync_listen_host | str | 127.0.0.1 | HTTP 监听地址（保持回环，经 Tunnel 对外） |
 | sync_listen_port | int | 9991 | HTTP 监听端口（与 Tunnel 指向一致，改动需重启） |
 | sync_platform_id | str | aiocqhttp | 战报发送平台实例 id |
@@ -255,7 +257,8 @@ whl抽奖
 
 - **入账**：竞猜系统发放奖励/冲正时 POST `/sync/credit` 到本插件（HMAC-SHA256 验签，±300 秒时间窗），按 `payout_id` 幂等入账；与 `sync_ledger` 流水同事务写入，冲正余额不足时回滚返回 409
 - **对账**：竞猜系统每日定时 GET `/sync/summary?date=YYYY-MM-DD`，按东八区日期返回各 QQ 净额（含冲正负数）。响应形如 `{"date":"YYYY-MM-DD","items":[{"qq_id":"<QQ>","total":<净额>}]}`；`total` 为当日净额，含冲正负数、可为负，**无 `count` 字段**。该字段名是对账接口的既定形状，**不要改名**（改名会导致竞猜系统每日对账取不到实发数据）
-- **绑定**：用户在竞猜网页生成 10 分钟一次性码后，群内发送「**绑定 <码>**」完成 QQ ↔ 竞猜账号绑定（群聊裸发或带 `/` 前缀均可触发）
+- **绑定**：一次性码（10 分钟、一码一次）+ 群内「**绑定 <码>**」完成 QQ ↔ 账号绑定（群聊裸发或带 `/` 前缀均可触发）。目标随 `bind_claim_url` 切换：**已配置** → 绑定码在统一认证中心网页生成，核销走认证中心 `POST /api/bind/claim`（`bind_secret` 独立验签）；**留空** → 沿用竞猜网页老路
+- **解绑**：群内发送「**解绑**」解除本 QQ 的绑定，积分余额不受影响。仅认证中心绑定模式下可用（走认证中心 `POST /api/identity/unbind`）；换绑 = 先解绑，再到认证中心生成新码重新绑定
 - **战报**：插件每分钟轮询竞猜系统待发战报，原样转发到 `sync_report_groups` 配置的群，**全部群发送成功才**确认（ack）；失败下轮重拉
 
 ### 配置与部署

@@ -4,7 +4,9 @@
   所有端点先验签（失败一律 401 {"error":"bad sign"}），仅监听本机回环地址。
 - 战报轮询：每 sync_poll_interval 秒拉取待发战报 → 转发到配置群 →
   全部目标群发送成功才 ack；失败不 ack，下轮重拉。
-- 绑定指令：群内「绑定 <码>」→ 调竞猜系统 /api/bind/claim 核销。
+- 绑定指令：群内「绑定 <码>」→ 核销一次性码。目标可切：配了 bind_claim_url 走
+  统一认证中心（bind_secret 独立验签，P0-8），留空沿用竞猜系统老路。
+- 解绑指令：群内「解绑」→ 调认证中心 /api/identity/unbind（仅认证中心绑定模式）。
 
 安全红线：SECRET 不打日志；验签用原始请求行与原始 body 字节。
 """
@@ -49,6 +51,15 @@ class SyncHandler:
 
     def _base_url(self) -> str:
         return str(self._cfg("sync_base_url") or "").strip().rstrip("/")
+
+    def _bind_target(self) -> tuple[str, str, bool]:
+        """绑定/解绑指令的出站目标（统一认证 P0-8）：
+        配了 bind_claim_url 走认证中心（bind_secret 独立验签，不复用 SYNC_SECRET）；
+        留空沿用竞猜系统老路。返回 (base, secret, is_auth)。"""
+        bind_url = str(self._cfg("bind_claim_url") or "").strip().rstrip("/")
+        if bind_url:
+            return bind_url, str(self._cfg("bind_secret") or "").strip(), True
+        return self._base_url(), str(self._cfg("sync_secret") or "").strip(), False
 
     # ─── HTTP 服务端 ──────────────────────────────────────
 
@@ -160,14 +171,16 @@ class SyncHandler:
         return self._session
 
     async def _signed_request(
-        self, method: str, path_with_query: str, body_obj: dict | None = None
+        self, method: str, path_with_query: str, body_obj: dict | None = None,
+        *, base: str | None = None, secret: str | None = None,
     ) -> tuple[int | None, dict | None]:
         """带签名的出站请求。返回 (status, 解析后的 JSON)；网络异常返回 (None, None)。
 
         契约：rawBody 必须与签名一致，故先序列化再签名、原样发送。
+        base/secret 缺省走竞猜同步通道；绑定/解绑指令显式传入 _bind_target() 的目标。
         """
-        secret = str(self._cfg("sync_secret") or "").strip()
-        base = self._base_url()
+        secret = str(self._cfg("sync_secret") or "").strip() if secret is None else secret
+        base = self._base_url() if base is None else base
         if not secret or not base:
             logger.warning(
                 "[sync] outbound skipped: sync_secret or sync_base_url not configured"
@@ -309,7 +322,7 @@ class SyncHandler:
                 return False
         return True
 
-    # ─── 绑定指令 ─────────────────────────────────────────
+    # ─── 绑定指令（统一认证 P0-8：目标可切认证中心，解绑指令同通道） ───────
 
     async def handle_bind(
         self, event, code: str
@@ -327,14 +340,25 @@ class SyncHandler:
             )
             yield event.plain_result(f"操作太频繁，请 {remaining:.0f} 秒后再试")
             return
-        if not self._enabled():
+        tbase, tsecret, is_auth = self._bind_target()
+        if not is_auth and not self._enabled():
             yield event.plain_result("同步功能未启用，请联系管理员")
             return
+        if not tbase or not tsecret:
+            yield event.plain_result(
+                "绑定功能未配置完整（认证中心需配 bind_claim_url 与 bind_secret），请联系管理员"
+                if is_auth
+                else "同步功能未启用，请联系管理员"
+            )
+            return
         if not code or len(code) > _BIND_CODE_MAX_LEN:
-            yield event.plain_result("绑定码无效，请在竞猜网页重新生成")
+            yield event.plain_result(
+                f"绑定码无效，请在{'认证中心' if is_auth else '竞猜'}网页重新生成"
+            )
             return
         status, data = await self._signed_request(
-            "POST", "/api/bind/claim", {"code": code, "qq_id": qq}
+            "POST", "/api/bind/claim", {"code": code, "qq_id": qq},
+            base=tbase, secret=tsecret,
         )
         if status is None:
             yield event.plain_result("绑定失败：网络异常，请稍后再试")
@@ -346,13 +370,15 @@ class SyncHandler:
             return
         if status == 401:
             logger.error("[sync] bind claim rejected by server (bad sign)")
-            yield event.plain_result("绑定失败：服务端验签未通过，请联系管理员检查 SYNC_SECRET")
+            yield event.plain_result("绑定失败：服务端验签未通过，请联系管理员检查绑定密钥配置")
             return
         err = (data or {}).get("error", "") if isinstance(data, dict) else ""
+        gen_hint = "认证中心" if is_auth else "竞猜"
         messages = {
-            "invalid_code": "❌ 绑定码无效或已过期，请在竞猜网页重新生成",
+            "invalid_code": f"❌ 绑定码无效或已过期，请在{gen_hint}网页重新生成",
             "qq_bound": "❌ 该 QQ 已绑定过账号，无需重复绑定",
             "user_bound": "❌ 该账号已绑定过其他 QQ",
+            "bind_moved": "❌ 绑定已迁移到统一认证中心，请在认证中心网页重新生成绑定码",
         }
         if err in messages:
             yield event.plain_result(messages[err])
@@ -361,3 +387,48 @@ class SyncHandler:
             (data or {}).get("message") if isinstance(data, dict) else None
         )
         yield event.plain_result(f"❌ 绑定失败：{fallback or '请稍后再试'}")
+
+    async def handle_unbind(self, event) -> AsyncGenerator[MessageEventResult, None]:
+        """解绑指令：解除本 QQ 与账号的绑定。仅认证中心绑定模式下可用；
+        积分真源在本插件侧、主键 QQ 号，解绑只解除关联，积分余额不动。"""
+        qq = event.get_sender_id()
+        try:
+            cooldown = max(0, int(self._cfg("sync_bind_cooldown", 10)))
+        except (TypeError, ValueError):
+            cooldown = 10
+        if not self._plugin.rate_limiter.check_user(
+            "sync_unbind", qq, event.get_group_id() or "", cooldown
+        ):
+            remaining = self._plugin.rate_limiter.get_remaining(
+                "sync_unbind", qq, event.get_group_id() or "", cooldown
+            )
+            yield event.plain_result(f"操作太频繁，请 {remaining:.0f} 秒后再试")
+            return
+        tbase, tsecret, is_auth = self._bind_target()
+        if not is_auth or not tbase or not tsecret:
+            yield event.plain_result("解绑功能未启用：需先配置认证中心绑定（bind_claim_url 与 bind_secret）")
+            return
+        status, data = await self._signed_request(
+            "POST", "/api/identity/unbind", {"qq_id": qq},
+            base=tbase, secret=tsecret,
+        )
+        if status is None:
+            yield event.plain_result("解绑失败：网络异常，请稍后再试")
+            return
+        if status == 200 and isinstance(data, dict) and data.get("ok"):
+            name = str(data.get("displayName") or "").strip()
+            display = f"{name} ({qq})" if name else qq
+            yield event.plain_result(f"✅ 已解绑：QQ {qq} ↔ {display}，积分余额不受影响")
+            return
+        if status == 401:
+            logger.error("[sync] unbind rejected by server (bad sign)")
+            yield event.plain_result("解绑失败：服务端验签未通过，请联系管理员检查绑定密钥配置")
+            return
+        err = (data or {}).get("error", "") if isinstance(data, dict) else ""
+        if err == "not_bound":
+            yield event.plain_result("该 QQ 未绑定过账号")
+            return
+        fallback = (
+            (data or {}).get("message") if isinstance(data, dict) else None
+        )
+        yield event.plain_result(f"❌ 解绑失败：{fallback or '请稍后再试'}")

@@ -863,20 +863,21 @@ class PointSystemPlugin(Star):
         async for result in self.sync_handler.handle_bind(event, m.group(1)):
             yield result
 
-    @filter.regex(r"^\s*/?\s*解绑\s*$")
+    @filter.regex(r"^\s*/?\s*解绑\s*(\d{6})?\s*$")
     async def on_sync_unbind(
         self, event: AstrMessageEvent
     ) -> AsyncGenerator[MessageEventResult, None]:
-        """QQ 解绑：发送「解绑」解除本 QQ 的账号绑定（积分余额不受影响）。
+        """QQ 解绑：发送「解绑」直接解绑，或「解绑 <6 位码>」核销认证中心网页
+        发起的解绑确认（积分余额不受影响）。
 
         仅认证中心绑定模式（配置 bind_claim_url + bind_secret）下可用；
         严格锚定匹配（同绑定指令），普通聊天含"解绑"二字不触发；
         兼容带/不带唤醒前缀两种形态。
         """
-        m = re.match(r"^\s*/?\s*解绑\s*$", event.get_message_str() or "")
+        m = re.match(r"^\s*/?\s*解绑\s*(\d{6})?\s*$", event.get_message_str() or "")
         if not m:
             return
-        async for result in self.sync_handler.handle_unbind(event):
+        async for result in self.sync_handler.handle_unbind(event, m.group(1)):
             yield result
 
     # ═══════════════════════════════════════════════════════════

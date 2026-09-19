@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.10.0 (2026-09-19)
+
+### 新功能
+
+- **解绑确认码核销**（配套 auth 项目增量 11 / PRD P1-4）：认证中心网页「解绑此 QQ」发起解绑后生成 6 位确认码，群里发送「**解绑 <码>**」完成确认
+  - 指令正则扩展为可选 6 位码（`解绑` / `解绑 123456` 均可，严格锚定不变——7 位以上数字不触发）；带码走认证中心 `POST /api/identity/unbind/confirm`，无码仍走原 `POST /api/identity/unbind` 直解老路
+  - 新增错误映射：`invalid_code`（码无效/过期 → 提示回网页重新发起）、`code_mismatch`（码与该 QQ 绑定的账号不一致）
+  - 出站验签契约不变（`bind_secret`）；冷却与限流沿用 `sync_bind_cooldown`
+
+### 测试
+
+- s20 新增 `test_unbind_confirm_with_code`：带码出站端点与 body 形状、`bind_secret` 验签、错误映射（无效码/不一致/未绑定/未知错误）、无码兼容直解；mock 服务器新增 `/api/identity/unbind/confirm` 路由
+
 ## v0.9.0 (2026-09-13)
 
 ### 新功能

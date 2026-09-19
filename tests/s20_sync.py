@@ -229,8 +229,25 @@ def _mock_app(state) -> web.Application:
         status, payload = state["unbind_queue"].pop(0)
         return web.json_response(payload, status=status)
 
+    async def unbind_confirm(request):
+        raw = await request.read()
+        ok = verify(
+            state["secret"], request.method, request.path_qs, raw,
+            request.headers.get(TS_HEADER), request.headers.get(SIGN_HEADER),
+        )
+        try:
+            body = json.loads(raw.decode("utf-8")) if raw else None
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            body = None
+        state["confirm_calls"].append({"verify": ok, "body": body})
+        if not ok:
+            return web.json_response({"error": "bad sign"}, status=401)
+        status, payload = state["confirm_queue"].pop(0)
+        return web.json_response(payload, status=status)
+
     app.router.add_post("/api/bind/claim", claim)
     app.router.add_post("/api/identity/unbind", unbind)
+    app.router.add_post("/api/identity/unbind/confirm", unbind_confirm)
     app.router.add_get("/api/reports/pending", pending)
     app.router.add_post("/api/reports/ack", ack)
     return app
@@ -244,6 +261,8 @@ async def _mock_ctx(**extra):
         "bind_calls": [],
         "unbind_queue": [],
         "unbind_calls": [],
+        "confirm_queue": [],
+        "confirm_calls": [],
         "pending_calls": 0,
         "reports": [],
         "ack_calls": [],
@@ -577,6 +596,43 @@ async def test_bind_auth_target_and_unbind():
         ev = FakeEvent(qq="9400", group_id="123")
         texts = await collect(handler.handle_unbind(ev))
         assert "解绑功能未启用" in texts[0], texts[0]
+
+
+async def test_unbind_confirm_with_code():
+    """增量 11：网页发起解绑 → 群里「解绑 <码>」走确认核销端点（P1-4）。
+    带码走 /api/identity/unbind/confirm；无码兼容走原直解端点。"""
+    bind_secret = "bindsecret-confirm"
+    async with TempDB() as t, _plugin_ctx(t) as (plugin, handler), _mock_ctx(secret=bind_secret) as (state, mock_base):
+        plugin.config_cache["bind_claim_url"] = mock_base
+        plugin.config_cache["bind_secret"] = bind_secret
+        # 带码成功：出站打 confirm 端点、body 带 code、验签用 bind_secret
+        state["confirm_queue"] = [(200, {"ok": True, "displayName": "小明"})]
+        ev = FakeEvent(qq="9500", group_id="123")
+        texts = await collect(handler.handle_unbind(ev, "123456"))
+        assert "已解绑" in texts[0] and "积分余额不受影响" in texts[0], texts[0]
+        assert state["confirm_calls"][0]["verify"] is True
+        assert state["confirm_calls"][0]["body"] == {"qq_id": "9500", "code": "123456"}
+        assert state["unbind_calls"] == [], "带码不应再打直解端点"
+        # 带码失败映射：无效码 / 码与 QQ 不一致 / 未绑定 / 未知错误回退 message
+        cases = [
+            (400, {"error": "invalid_code"}, "解绑码无效或已过期", "网页重新发起"),
+            (400, {"error": "code_mismatch"}, "账号不一致", None),
+            (400, {"error": "not_bound"}, "未绑定过账号", None),
+            (400, {"error": "weird", "message": "维护中"}, "维护中", None),
+        ]
+        for i, (status, payload, *expects) in enumerate(cases):
+            state["confirm_queue"] = [(status, payload)]
+            ev = FakeEvent(qq=str(9510 + i), group_id="123")
+            texts = await collect(handler.handle_unbind(ev, "654321"))
+            assert len(texts) == 1
+            for expect in filter(None, expects):
+                assert expect in texts[0], (i, texts[0])
+        # 无码仍走原直解端点（老路兼容）
+        state["unbind_queue"] = [(200, {"ok": True, "displayName": "小明"})]
+        ev = FakeEvent(qq="9520", group_id="123")
+        texts = await collect(handler.handle_unbind(ev))
+        assert "已解绑" in texts[0], texts[0]
+        assert state["unbind_calls"][-1]["body"] == {"qq_id": "9520"}
 
 
 # ─── 战报轮询 ──────────────────────────────────────────────

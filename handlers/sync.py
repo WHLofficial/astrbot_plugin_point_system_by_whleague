@@ -388,9 +388,11 @@ class SyncHandler:
         )
         yield event.plain_result(f"❌ 绑定失败：{fallback or '请稍后再试'}")
 
-    async def handle_unbind(self, event) -> AsyncGenerator[MessageEventResult, None]:
+    async def handle_unbind(self, event, code: str | None = None) -> AsyncGenerator[MessageEventResult, None]:
         """解绑指令：解除本 QQ 与账号的绑定。仅认证中心绑定模式下可用；
-        积分真源在本插件侧、主键 QQ 号，解绑只解除关联，积分余额不动。"""
+        积分真源在本插件侧、主键 QQ 号，解绑只解除关联，积分余额不动。
+        带码（网页「解绑此 QQ」发起 → 群里发「解绑 <码>」）走确认核销端点；
+        无码（群里直接发「解绑」）走原直解端点。"""
         qq = event.get_sender_id()
         try:
             cooldown = max(0, int(self._cfg("sync_bind_cooldown", 10)))
@@ -408,8 +410,13 @@ class SyncHandler:
         if not is_auth or not tbase or not tsecret:
             yield event.plain_result("解绑功能未启用：需先配置认证中心绑定（bind_claim_url 与 bind_secret）")
             return
+        path, body = (
+            ("/api/identity/unbind/confirm", {"qq_id": qq, "code": code})
+            if code
+            else ("/api/identity/unbind", {"qq_id": qq})
+        )
         status, data = await self._signed_request(
-            "POST", "/api/identity/unbind", {"qq_id": qq},
+            "POST", path, body,
             base=tbase, secret=tsecret,
         )
         if status is None:
@@ -425,6 +432,12 @@ class SyncHandler:
             yield event.plain_result("解绑失败：服务端验签未通过，请联系管理员检查绑定密钥配置")
             return
         err = (data or {}).get("error", "") if isinstance(data, dict) else ""
+        if err == "invalid_code":
+            yield event.plain_result("❌ 解绑码无效或已过期，请在认证中心网页重新发起解绑")
+            return
+        if err == "code_mismatch":
+            yield event.plain_result("❌ 解绑码与该 QQ 绑定的账号不一致，请用绑定 QQ 本人操作")
+            return
         if err == "not_bound":
             yield event.plain_result("该 QQ 未绑定过账号")
             return

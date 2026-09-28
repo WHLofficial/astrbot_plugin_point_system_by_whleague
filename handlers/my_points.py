@@ -3,8 +3,10 @@ from collections.abc import AsyncGenerator
 from astrbot.api import logger
 from astrbot.api.event import MessageEventResult
 
+from ..services.sync_service import GUESS_GROUP_ID
 from ..utils.group_info import fetch_member_info
 from ..utils.helpers import today_str
+from ..utils.reason_labels import label_for
 from ..utils.security import clean_display_name
 
 
@@ -46,8 +48,12 @@ class MyPointsHandler:
             if rank:
                 lines.append(f"· 本群排名: 第 {rank} 名")
 
+            # 竞猜入账记在伪群 guess 下，不并入的话余额变了而这里看不到对应行
             records = await self._plugin.dao.get_transactions(
-                qq=qq, group_id=group_id, limit=5
+                qq=qq,
+                group_id=group_id,
+                limit=5,
+                extra_groups=(GUESS_GROUP_ID,),
             )
             if records:
                 lines.append("")
@@ -55,7 +61,7 @@ class MyPointsHandler:
                 for r in records:
                     icon = "\U0001f7e2" if r["amount"] >= 0 else "\U0001f534"
                     lines.append(
-                        f"{icon} {r['amount']:+d}  {r['reason']}  {r['created_at'][:16]}"
+                        f"{icon} {r['amount']:+d}  {label_for(r['reason'])}  {r['created_at'][:16]}"
                     )
             yield event.plain_result("\n".join(lines))
         except Exception as e:

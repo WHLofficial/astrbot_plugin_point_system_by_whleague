@@ -198,15 +198,36 @@ class PointDAO:
         group_id: str | None = None,
         limit: int = 10,
         offset: int = 0,
+        extra_groups: tuple[str, ...] = (),
     ):
+        """查询流水。
+
+        Args:
+            qq: 限定 QQ；为空则不限用户。
+            group_id: 限定群号；为空则**不按群过滤**（既有语义，勿改为等值匹配）。
+            limit: 返回条数。
+            offset: 偏移量。
+            extra_groups: 与 group_id 一起纳入的附加群号（如竞猜伪群 `guess`）。
+                仅在 group_id 非空时生效——此时按 `group_id IN (...)` 过滤，
+                用于把全局维度的流水并入按群展示的视图。
+        """
         conditions = []
         params = []
         if qq:
             conditions.append("qq=?")
             params.append(qq)
         if group_id:
-            conditions.append("group_id=?")
-            params.append(group_id)
+            groups = (group_id,) + tuple(
+                g for g in extra_groups if g and g != group_id
+            )
+            if len(groups) == 1:
+                conditions.append("group_id=?")
+                params.append(groups[0])
+            else:
+                conditions.append(
+                    f"group_id IN ({','.join('?' * len(groups))})"
+                )
+                params.extend(groups)
         where = " AND ".join(conditions) if conditions else "1=1"
         sql = f"SELECT * FROM point_transactions WHERE {where} ORDER BY created_at DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])

@@ -27,6 +27,7 @@ from .utils.keyword_matcher import (
     is_signin_message,
 )
 from .utils.rate_limiter import RateLimiter
+from .utils.reason_labels import label_for
 
 
 class PointSystemPlugin(Star):
@@ -776,6 +777,7 @@ class PointSystemPlugin(Star):
         group_id = event.get_group_id()
         msg = event.get_message_str()
         parts = msg.split(maxsplit=2)
+        from .services.sync_service import GUESS_GROUP_ID
         from .utils.security import parse_qq_arg
 
         is_admin = event.is_admin() or await self.dao.is_admin(qq, group_id)
@@ -813,8 +815,14 @@ class PointSystemPlugin(Star):
                 page = max(1, int(parts[2]))
 
         offset = (page - 1) * 10
+        # 竞猜入账记在伪群 guess 下，按群过滤会把它们全部隐藏（余额变了、流水却空）；
+        # 因此按人查时一并纳入。管理员 all 是群内审计视图，保持群内口径不并入。
         records = await self.dao.get_transactions(
-            qq=target_qq, group_id=group_id, limit=10, offset=offset
+            qq=target_qq,
+            group_id=group_id,
+            limit=10,
+            offset=offset,
+            extra_groups=(GUESS_GROUP_ID,) if target_qq else (),
         )
         if not records:
             yield event.plain_result("\u6ca1\u6709\u6d41\u6c34\u8bb0\u5f55")
@@ -823,7 +831,7 @@ class PointSystemPlugin(Star):
         for r in records:
             icon = "\U0001f7e2" if r["amount"] >= 0 else "\U0001f534"
             lines.append(
-                f"{icon} {r['amount']:+d}  {r['reason']}  {r['created_at'][:16]}"
+                f"{icon} {r['amount']:+d}  {label_for(r['reason'])}  {r['created_at'][:16]}"
             )
         yield event.plain_result("\n".join(lines))
 

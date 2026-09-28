@@ -714,11 +714,85 @@ async def test_start_disabled_and_poll_loop_cancel():
         assert task.cancelled()
 
 
+async def test_credit_visible_in_group_view():
+    """回归：竞猜行记在伪群 guess 下，按真实群号查流水必须能带出（此前「余额变了却没流水」）。"""
+    from astrbot_plugin_point_system_by_whleague.services.sync_service import (
+        GUESS_GROUP_ID,
+    )
+    from astrbot_plugin_point_system_by_whleague.utils.reason_labels import label_for
+
+    async with TempDB() as t, _plugin_ctx(t) as (_, handler), _server_ctx(handler) as base:
+        st, _ = await _post_credit(
+            base,
+            {"payout_id": "po-vis", "qq_id": "10009", "amount": 120,
+             "type": "reward", "event_id": 7},
+        )
+        assert st == 200
+        # 用户在真实群 100001 里查询，入账行却挂在 guess：不并入就看不到
+        assert await t.dao.get_transactions(qq="10009", group_id="100001") == []
+        rows = await t.dao.get_transactions(
+            qq="10009", group_id="100001", extra_groups=(GUESS_GROUP_ID,)
+        )
+        assert [r["reason"] for r in rows] == ["guess_reward"]
+        assert label_for(rows[0]["reason"]) == "竞猜奖励"
+        # 冲正同样可见、同样有中文标签
+        st, _ = await _post_credit(
+            base,
+            {"payout_id": "po-vis-r", "qq_id": "10009", "amount": -20,
+             "type": "reversal", "event_id": 7},
+        )
+        assert st == 200
+        rows = await t.dao.get_transactions(
+            qq="10009", group_id="100001", extra_groups=(GUESS_GROUP_ID,)
+        )
+        assert {r["reason"] for r in rows} == {"guess_reward", "guess_reversal"}
+        assert label_for("guess_reversal") == "竞猜冲正"
+    return "竞猜流水按真实群号可带出，reason 显示中文"
+
+
+async def test_reason_labels_cover_sync_codes():
+    """标签表必须覆盖同步侧 reason 常量（改名/新增时此测试先红）；未知码原样返回。"""
+    from astrbot_plugin_point_system_by_whleague.services.sync_service import (
+        REASON_REVERSAL,
+        REASON_REWARD,
+    )
+    from astrbot_plugin_point_system_by_whleague.utils.reason_labels import (
+        REASON_LABELS,
+        label_for,
+    )
+
+    assert REASON_REWARD in REASON_LABELS and REASON_REVERSAL in REASON_LABELS
+    assert label_for(REASON_REWARD) == "竞猜奖励"
+    assert label_for(REASON_REVERSAL) == "竞猜冲正"
+    # 各业务码都有中文标签（签到存的就是中文，保持原样）
+    assert label_for("签到") == "签到"
+    for code in (
+        "daily_keyword",
+        "active_reward",
+        "admin_add",
+        "admin_sub",
+        "rob_reward",
+        "rob_lost",
+        "rob_cost",
+        "lottery_cost",
+        "lottery_reward",
+        "redeem_cost",
+        "redeem_refund",
+    ):
+        assert label_for(code) != code, code
+    # 未登记的 reason 原样返回，None 不炸
+    assert label_for("some_future_code") == "some_future_code"
+    assert label_for(None) == ""
+    return "标签表覆盖同步与既有 reason 码，未知码回退原文"
+
+
 TESTS = [
     ("签名工具（canonical/篡改/超窗/缺头）", test_sign_unit),
     ("credit 合法入账与流水", test_credit_happy_path),
     ("credit 重复幂等", test_credit_duplicate_idempotent),
     ("credit 冲正与余额不足 409", test_credit_reversal_and_conflict),
+    ("竞猜流水在按群视图中可见", test_credit_visible_in_group_view),
+    ("reason 中文标签覆盖", test_reason_labels_cover_sync_codes),
     ("credit 非法 body 400", test_credit_bad_body),
     ("验签红线 401（credit+summary）", test_auth_rejections),
     ("summary 东八区过滤与净额", test_summary_shanghai_filter),

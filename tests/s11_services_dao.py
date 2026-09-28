@@ -421,6 +421,52 @@ async def test_dao_transaction_queries():
     return "DAO：流水分页/组合过滤"
 
 
+async def test_dao_transactions_extra_groups():
+    """DAO：extra_groups 把伪群（竞猜 guess）并入按群视图；group_id=None 语义不变。"""
+    async with TempDB() as t:
+        for gid, reason in (
+            ("G1", "签到"),
+            ("G1", "lottery_cost"),
+            ("guess", "guess_reward"),
+            ("G2", "签到"),
+        ):
+            await t.db.execute(
+                "INSERT INTO point_transactions (qq, group_id, amount, balance_after, reason) VALUES (?,?,?,?,?)",
+                ("u1", gid, 1, 1, reason),
+            )
+        # 不传 extra_groups：竞猜行不可见（既有行为不变，别群行也不进来）
+        rows = await t.dao.get_transactions(qq="u1", group_id="G1")
+        assert {r["reason"] for r in rows} == {"签到", "lottery_cost"}
+        # 传入后并入伪群行
+        rows = await t.dao.get_transactions(
+            qq="u1", group_id="G1", extra_groups=("guess",)
+        )
+        assert {r["reason"] for r in rows} == {"签到", "lottery_cost", "guess_reward"}
+        assert {r["group_id"] for r in rows} == {"G1", "guess"}  # G2 仍被排除
+        # 分页作用在并集上
+        p1 = await t.dao.get_transactions(
+            qq="u1", group_id="G1", limit=2, offset=0, extra_groups=("guess",)
+        )
+        p2 = await t.dao.get_transactions(
+            qq="u1", group_id="G1", limit=2, offset=2, extra_groups=("guess",)
+        )
+        assert len(p1) == 2 and len(p2) == 1
+        assert {r["reason"] for r in p1} | {r["reason"] for r in p2} == {
+            "签到",
+            "lottery_cost",
+            "guess_reward",
+        }
+        # 与 group_id 重复时退化为等值过滤，不产生重复行
+        rows = await t.dao.get_transactions(
+            qq="u1", group_id="G1", extra_groups=("G1",)
+        )
+        assert len(rows) == 2
+        # group_id=None ⇒ 不过滤的既有语义不受 extra_groups 影响
+        rows = await t.dao.get_transactions(extra_groups=("guess",))
+        assert len(rows) == 4
+    return "DAO：extra_groups 并入伪群流水、分页、group_id=None 语义"
+
+
 async def test_dao_redeem_record_queries():
     async with TempDB() as t:
         await t.dao.add_item("商品", 10, 5)
@@ -635,6 +681,7 @@ TESTS = [
     ("negative_title_bot_card", test_negative_title_with_bot_card),
     ("negative_title_id_reuse", test_negative_title_id_reuse),
     ("dao_transaction_queries", test_dao_transaction_queries),
+    ("dao_transaction_extra_groups", test_dao_transactions_extra_groups),
     ("dao_redeem_record_queries", test_dao_redeem_record_queries),
     ("dao_redeem_status_machine", test_dao_redeem_status_machine),
     ("dao_admin_global_scope", test_dao_admin_global_scope),

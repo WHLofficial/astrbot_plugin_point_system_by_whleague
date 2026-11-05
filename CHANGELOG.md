@@ -9,11 +9,12 @@
   - 「你: 第 N 名」自排名同口径：`get_rank_in_group` 新增 `member_qqs` 参数，只统计仍在群的更高分者
   - 发言榜同口径：「我的发言」的本群名次/群总量/活跃画像、发言里程碑播报的名次均剔除退群者
   - 全局榜为跨群口径，不过滤；成员接口不可用（无 bot/异常/非列表返回）时降级不过滤，榜单可用性优先。不删任何数据：退群者回群后积分/头衔/发言史无损恢复
+  - **`/签到统计` 同口径**：总注册用户、今日已签到、签到率（分母分子同步收敛）、今日首签、连签王均剔除退群者；`get_stats` 改为列表推导（DAO 合并 `count_signins_today`/`get_first_signer_today` 为 `get_signins_today`，`get_max_streak_today` 改列表版 `get_streaks_today`，新增 `get_user_qqs_in_group`；`count_users_in_group` 保留）
   - 新增 `utils/group_info.fetch_member_qqs`（平台 API 调用仍收敛在该模块）
 
 ### 测试
 
-- 新增 s24「排行榜剔除退群成员」：fetch 契约（正常/None/异常/非列表/空列表降级）、本群榜过滤与名次补位、降级保持旧行为、过滤后不足 3 人回退全局、DAO 自排名 member_qqs 分支、发言榜与里程碑播报同口径
+- 新增 s24「排行榜剔除退群成员」：fetch 契约（正常/None/异常/非列表/空列表降级）、本群榜过滤与名次补位、降级保持旧行为、过滤后不足 3 人回退全局、DAO 自排名 member_qqs 分支、发言榜与里程碑播报同口径、签到统计（含降级回全量）
 - `FakeBot` 支持 `get_group_member_list`（数字 QQ 按真实协议返回 int user_id，未配置时返回 None 模拟接口不可用）
 
 ## v0.10.1 (2026-09-28)

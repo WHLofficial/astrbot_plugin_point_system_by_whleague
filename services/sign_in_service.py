@@ -242,19 +242,31 @@ class SignInService:
             "msg": "\n".join(parts),
         }
 
-    async def get_stats(self, group_id: str) -> dict:
+    async def get_stats(self, group_id: str, member_qqs: set | None = None) -> dict:
+        """签到统计；member_qqs 非 None 时剔除已退群账号（与排行榜同口径）。
+
+        total/today_count/首签/连签王全部在过滤后推导，签到率分母分子同步收敛。
+        """
         today = today_str()
-        total = await self._dao.count_users_in_group(group_id)
-        today_count = await self._dao.count_signins_today(group_id, today)
-        first_signer = await self._dao.get_first_signer_today(group_id, today)
-        streak_king = await self._dao.get_max_streak_today(group_id)
+        user_qqs = await self._dao.get_user_qqs_in_group(group_id)
+        signins = await self._dao.get_signins_today(group_id, today)
+        streaks = await self._dao.get_streaks_today(group_id)
+        if member_qqs is not None:
+            user_qqs = [q for q in user_qqs if q in member_qqs]
+            signins = [r for r in signins if str(r["qq"]) in member_qqs]
+            streaks = [r for r in streaks if str(r["qq"]) in member_qqs]
+
+        total = len(user_qqs)
+        today_count = len(signins)
+        first_signer = signins[0] if signins else None
+        streak_king = streaks[0] if streaks else None
 
         rate = f"{today_count / total * 100:.1f}%" if total > 0 else "0%"
         return {
             "total": total,
             "today_count": today_count,
             "rate": rate,
-            "first_signer_qq": first_signer["qq"] if first_signer else None,
-            "streak_king_qq": streak_king["qq"] if streak_king else None,
+            "first_signer_qq": str(first_signer["qq"]) if first_signer else None,
+            "streak_king_qq": str(streak_king["qq"]) if streak_king else None,
             "streak_days": streak_king["consecutive_days"] if streak_king else 0,
         }

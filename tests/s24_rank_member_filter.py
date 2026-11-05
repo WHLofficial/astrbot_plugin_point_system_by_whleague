@@ -175,6 +175,60 @@ async def test_dao_rank_in_group_with_member_filter():
     return "DAO 自排名：member_qqs 只统计在群的更高分者，None 时保持 COUNT 老口径"
 
 
+async def test_signin_stats_filter_left_members():
+    from astrbot_plugin_point_system_by_whleague.handlers.ranking import (
+        RankingHandler,
+    )
+    from astrbot_plugin_point_system_by_whleague.services.sign_in_service import (
+        SignInService,
+    )
+
+    async with TempDB() as t:
+        # u1 已退群但今日首签 + 连签最高；u0 注册未签到；u2/u3 在群已签
+        for qq, days in (("u0", 0), ("u1", 30), ("u2", 5), ("u3", 2)):
+            await t.db.execute(
+                "INSERT INTO accounts (qq, points, consecutive_days) VALUES (?,10,?)",
+                (qq, days),
+            )
+            await t.db.execute(
+                "INSERT INTO users (qq, group_id) VALUES (?, '100000')", (qq,)
+            )
+        from astrbot_plugin_point_system_by_whleague.utils.helpers import today_str
+
+        for qq, at in (("u1", "08:00:00"), ("u2", "09:00:00"), ("u3", "10:00:00")):
+            await t.db.execute(
+                "INSERT INTO sign_in_log (qq, group_id, sign_date, created_at) "
+                "VALUES (?, '100000', ?, ? || ?)",
+                (qq, today_str(), today_str() + " ", at),
+            )
+
+        svc = SignInService(
+            t.db, t.dao, None, None, None, base_cfg()
+        )  # get_stats 不触碰签到/积分路径，依赖可置 None
+        plugin = types.SimpleNamespace(sign_in_service=svc, config_cache=base_cfg())
+        handler = RankingHandler(plugin)
+
+        # 过滤口径：u1（退群）不进任何统计
+        ev = FakeEvent(
+            "u0",
+            "100000",
+            msg="/签到统计",
+            bot=FakeBot(member_qqs={"u0", "u2", "u3"}),
+        )
+        text = "\n".join(await collect(handler.stats(ev)))
+        assert "总注册用户: 3" in text and "已签到: 2" in text
+        assert "签到率: 66.7%" in text
+        assert "今日首签: u2" in text and "连签王: u2 (5天)" in text
+        assert "u1" not in text
+
+        # 降级口径（无成员列表）：回到全量统计
+        ev2 = FakeEvent("u0", "100000", msg="/签到统计")
+        text2 = "\n".join(await collect(handler.stats(ev2)))
+        assert "总注册用户: 4" in text2 and "已签到: 3" in text2
+        assert "今日首签: u1" in text2 and "连签王: u1 (30天)" in text2
+    return "签到统计同口径：总注册/今日签到/首签/连签王/签到率均剔除退群者，降级回全量"
+
+
 async def test_speak_query_and_milestone_filter_left_members():
     from astrbot_plugin_point_system_by_whleague.handlers.speak_stat import (
         SpeakStatHandler,
@@ -218,4 +272,5 @@ TESTS = [
         "speak_query_and_milestone_filter_left_members",
         test_speak_query_and_milestone_filter_left_members,
     ),
+    ("signin_stats_filter_left_members", test_signin_stats_filter_left_members),
 ]

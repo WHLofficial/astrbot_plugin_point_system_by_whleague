@@ -167,6 +167,13 @@ class PointDAO:
         )
         return row["cnt"] if row else 0
 
+    async def get_user_qqs_in_group(self, group_id: str) -> list[str]:
+        """本群全部关联 QQ（含已退群的残留行），供调用方按成员集合过滤。"""
+        rows = await self._db.fetchall(
+            "SELECT qq FROM users WHERE group_id=?", (group_id,)
+        )
+        return [str(r["qq"]) for r in rows]
+
     async def get_birthday_users(self, group_id: str, today_mmdd: str):
         return await self._db.fetchall(
             "SELECT u.qq FROM users u JOIN accounts a ON a.qq=u.qq "
@@ -180,26 +187,28 @@ class PointDAO:
 
     # ─── sign_in_log ──────────────────────────────────────
 
-    async def count_signins_today(self, group_id: str, sign_date: str) -> int:
-        row = await self._db.fetchone(
-            "SELECT COUNT(*) AS cnt FROM sign_in_log WHERE group_id=? AND sign_date=?",
-            (group_id, sign_date),
-        )
-        return row["cnt"] if row else 0
+    async def get_signins_today(self, group_id: str, sign_date: str) -> list:
+        """本群今日签到明细，按签到时间升序（一人一行，UNIQUE 约束保证）。
 
-    async def get_first_signer_today(self, group_id: str, sign_date: str):
-        return await self._db.fetchone(
-            "SELECT qq, MIN(created_at) AS first_time FROM sign_in_log WHERE group_id=? AND sign_date=?",
+        调用方据此推导今日签到数与首签者（可按成员集合过滤退群账号）。
+        """
+        return await self._db.fetchall(
+            "SELECT qq, created_at AS first_time FROM sign_in_log "
+            "WHERE group_id=? AND sign_date=? ORDER BY created_at ASC, qq ASC",
             (group_id, sign_date),
         )
 
-    async def get_max_streak_today(self, group_id: str):
-        return await self._db.fetchone(
+    async def get_streaks_today(self, group_id: str) -> list:
+        """本群今日签到者的连签天数，按天数降序、签到时间升序。
+
+        调用方过滤后取首个即连签王（今日签到者 ≤ 群注册数，全量拉取无压力）。
+        """
+        return await self._db.fetchall(
             """SELECT u.qq, a.consecutive_days FROM users u
                JOIN accounts a ON a.qq=u.qq
                INNER JOIN sign_in_log s ON s.qq=u.qq AND s.group_id=u.group_id
                WHERE u.group_id=? AND s.sign_date=?
-               ORDER BY a.consecutive_days DESC, s.created_at ASC LIMIT 1""",
+               ORDER BY a.consecutive_days DESC, s.created_at ASC""",
             (group_id, self._today_str()),
         )
 

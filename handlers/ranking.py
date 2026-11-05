@@ -109,7 +109,13 @@ class RankingHandler:
             if not group_id:
                 yield event.plain_result("统计仅支持群聊")
                 return
-            s = await self._plugin.sign_in_service.get_stats(group_id)
+            # 与排行同口径：已退群账号不进总注册/今日签到/首签/连签王
+            member_qqs = await fetch_member_qqs(
+                getattr(event, "bot", None), group_id
+            )
+            s = await self._plugin.sign_in_service.get_stats(
+                group_id, member_qqs=member_qqs
+            )
             lines = [
                 "📊 今日签到统计",
                 f"👥 总注册用户: {s['total']}",

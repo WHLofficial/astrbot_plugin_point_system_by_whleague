@@ -3,7 +3,7 @@ from collections.abc import AsyncGenerator
 from astrbot.api import logger
 from astrbot.api.event import MessageChain, MessageEventResult
 
-from ..utils.group_info import fetch_member_info
+from ..utils.group_info import fetch_member_info, fetch_member_qqs
 from ..utils.helpers import (
     consecutive_day_streak,
     month_bounds,
@@ -75,6 +75,12 @@ class SpeakStatHandler:
         """
         titles = self._plugin.config_cache.get("speak_stat_titles")
         rows = await self._plugin.speak_dao.get_group_ranking(group_id)
+        # 与积分榜同口径：已退群账号不再占名次（接口不可用时不过滤）
+        member_qqs = await fetch_member_qqs(
+            getattr(event, "bot", None), group_id
+        )
+        if member_qqs is not None:
+            rows = [r for r in rows if str(r["qq"]) in member_qqs]
         rank = _group_stats(rows, total)[0]
         text = render_milestone(
             self._plugin.config_cache.get("speak_milestone_template"),
@@ -126,6 +132,12 @@ class SpeakStatHandler:
             lines.append(f"· 上月发言: {last_month_count} 条")
 
             rows = await dao.get_group_ranking(group_id)
+            # 与积分榜同口径：已退群账号不占名次、不进群总量（接口不可用不滤）
+            member_qqs = await fetch_member_qqs(
+                getattr(event, "bot", None), group_id
+            )
+            if member_qqs is not None:
+                rows = [r for r in rows if str(r["qq"]) in member_qqs]
             rank, members, group_total, less = _group_stats(rows, total)
             lines.append(f"· 累计发言: {total} 条 · 本群第 {rank} 名")
 

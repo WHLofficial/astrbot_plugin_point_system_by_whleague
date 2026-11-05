@@ -101,11 +101,17 @@ class PointDAO:
         )
 
     async def get_rank_in_group(
-        self, qq: str, group_id: str, min_points: int = 1
+        self,
+        qq: str,
+        group_id: str,
+        min_points: int = 1,
+        member_qqs: set | None = None,
     ) -> int | None:
         """返回用户在本群积分榜的排名（1 起，同分同名次）。
 
         与排行榜口径一致：非本群成员或积分低于 min_points 时返回 None（未上榜）。
+        member_qqs 非 None 时（当前群成员集合）只统计仍在群的更高分用户，
+        已退群账号不再占位；None 时按库内全量计数（成员接口不可用的降级口径）。
         """
         row = await self._db.fetchone(
             "SELECT a.points FROM users u JOIN accounts a ON a.qq=u.qq "
@@ -114,6 +120,13 @@ class PointDAO:
         )
         if not row or row["points"] < min_points:
             return None
+        if member_qqs is not None:
+            rows = await self._db.fetchall(
+                "SELECT u.qq FROM users u JOIN accounts a ON a.qq=u.qq "
+                "WHERE u.group_id=? AND a.points > ?",
+                (group_id, row["points"]),
+            )
+            return sum(1 for r in rows if str(r["qq"]) in member_qqs) + 1
         rank_row = await self._db.fetchone(
             "SELECT COUNT(*)+1 AS rank FROM users u JOIN accounts a ON a.qq=u.qq "
             "WHERE u.group_id=? AND a.points > ?",

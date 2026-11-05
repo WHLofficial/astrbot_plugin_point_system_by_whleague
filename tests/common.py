@@ -169,16 +169,26 @@ class FakeEvent:
 
 
 class FakeBot:
-    """记录 call_action 调用的假平台 bot（验证群名片设置/成员信息获取）。"""
+    """记录 call_action 调用的假平台 bot（验证群名片设置/成员信息获取/成员列表）。"""
 
-    def __init__(self, member_card=None):
+    def __init__(self, member_card=None, member_qqs=None):
         self.calls = []
         self.member_card = member_card
+        self.member_qqs = member_qqs
 
     async def call_action(self, action, **kwargs):
         self.calls.append((action, dict(kwargs)))
         if action == "get_group_member_info":
             return {"card": self.member_card, "user_id": kwargs.get("user_id")}
+        if action == "get_group_member_list":
+            # 未配置成员列表 → 返回 None 模拟接口不可用，调用方应降级不过滤
+            if self.member_qqs is None:
+                return None
+            # 数字 QQ 按真实协议返回 int user_id；非数字测试 QQ 原样返回
+            return [
+                {"user_id": int(q) if str(q).isdigit() else q}
+                for q in self.member_qqs
+            ]
         return None
 
 

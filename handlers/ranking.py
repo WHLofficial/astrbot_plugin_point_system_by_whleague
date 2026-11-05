@@ -4,7 +4,7 @@ from collections.abc import AsyncGenerator
 from astrbot.api import logger
 from astrbot.api.event import MessageEventResult
 
-from ..utils.group_info import fetch_member_info
+from ..utils.group_info import fetch_member_info, fetch_member_qqs
 from ..utils.security import clean_display_name
 
 
@@ -47,7 +47,13 @@ class RankingHandler:
                 yield event.plain_result("排行仅支持群聊")
                 return
 
-            result = await self._plugin.ranking_service.get_ranking(group_id)
+            # 实时成员集合：已退群/被踢账号从本群榜剔除（接口不可用时不过滤）
+            member_qqs = await fetch_member_qqs(
+                getattr(event, "bot", None), group_id
+            )
+            result = await self._plugin.ranking_service.get_ranking(
+                group_id, member_qqs=member_qqs
+            )
             users = result["users"]
             if not users:
                 yield event.plain_result("暂无排行数据")
@@ -71,7 +77,7 @@ class RankingHandler:
             qq = event.get_sender_id()
             lines.append("\u2500" * 15)
             self_rank = await self._plugin.ranking_service.get_self_rank(
-                qq, group_id, result["is_global"]
+                qq, group_id, result["is_global"], member_qqs=member_qqs
             )
             if self_rank is None:
                 sign_kw = (
